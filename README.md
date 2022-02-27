@@ -7,8 +7,9 @@ A pure nim library implementing:
 - xchacha20_poly1305
 
 
-## ⚠️ This is WIP and needs review
-Reviewers are welcome!
+## ⚠️ This is WIP and needs review ⚠️
+- This project was created for learning.
+- It needs to be reviewed and users should think & review before using.
 
 ### TODO
 - [x] chacha20
