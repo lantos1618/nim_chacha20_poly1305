@@ -10,6 +10,7 @@ A pure nim library implementing:
 ## ⚠️ This is WIP and needs review ⚠️
 - This project was created for learning.
 - It needs to be reviewed and users should think & review before using.
+- Vunrable to side channel attacks on the POLY function
 
 ### TODO
 - [x] chacha20
