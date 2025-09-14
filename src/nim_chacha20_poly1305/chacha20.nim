@@ -1,5 +1,4 @@
 import bitops, endians
-import stint
 import common
 
 # chacha20

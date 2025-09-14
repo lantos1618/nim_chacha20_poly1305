@@ -1,6 +1,10 @@
 # TODO
-import stint
 import common, chacha20, poly1305
+
+# Helper to convert uint64 to little-endian bytes
+proc uint64ToBytes(x: uint64): array[8, byte] =
+    for i in 0..7:
+        result[i] = byte((x shr (i * 8)) and 0xff)
 
 # destination_key_block should be null
 proc chacha20_poly1305_key_gen*(
@@ -53,8 +57,8 @@ proc chacha20_aead_poly1305*(
 
     mac_data = mac_data & @auth_data & poly_pad(@auth_data, 16)
     mac_data = mac_data & @cipher_data & poly_pad(@cipher_data, 16)
-    mac_data = mac_data & @(auth_data.len.stuint(64).toBytesLE())
-    mac_data = mac_data & @(cipher_data.len.stuint(64).toBytesLE())
+    mac_data = mac_data & @(uint64ToBytes(auth_data.len.uint64))
+    mac_data = mac_data & @(uint64ToBytes(cipher_data.len.uint64))
 
     poly.poly1305_update(mac_data)
     tag = poly.tag

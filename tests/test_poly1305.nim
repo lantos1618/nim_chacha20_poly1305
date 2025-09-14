@@ -1,11 +1,61 @@
-# Tests for the libsodium-based Poly1305 implementation
+# This is just an example to get you started. You may wish to put all of your
+# tests into a single file, or separate them into multiple `test1`, `test2`
+# etc. files (better names are recommended, just make sure the name starts with
+# the letter 't').
+#
+# To run these tests, simply execute `nimble test`.
 
 import unittest
 
 import nim_chacha20_poly1305/[common, poly1305]
+import stint
 
-suite "poly1305_libsodium":
-    test "poly_mac test 2 - known working case":
+suite "poly1305":
+    test "poly1305_clamp":
+        var
+            poly_in: Poly1305
+            r_expected = "806d5400e52447c036d555408bed685"
+
+        poly_in.r = fromBytes(UInt256, [
+            0x85'u8, 0xd6'u8, 0xbe'u8, 0x78'u8, 0x57'u8, 0x55'u8, 0x6d'u8, 0x33'u8,
+            0x7f'u8, 0x44'u8, 0x52'u8, 0xfe'u8, 0x42'u8, 0xd5'u8, 0x06'u8, 0xa8'u8
+        ])
+        poly_in.poly1305_clamp()
+        check(poly_in.r.toHex() == r_expected)
+
+    test "poly_mac":
+        var
+            poly_in: Poly1305
+            key_in: Key = [
+                0x85'u8, 0xd6'u8, 0xbe'u8, 0x78'u8, 0x57'u8, 0x55'u8, 0x6d'u8, 0x33'u8,
+                0x7f'u8, 0x44'u8, 0x52'u8, 0xfe'u8, 0x42'u8, 0xd5'u8, 0x06'u8, 0xa8'u8,
+                0x01'u8, 0x03'u8, 0x80'u8, 0x8a'u8, 0xfb'u8, 0x0d'u8, 0xb2'u8, 0xfd'u8,
+                0x4a'u8, 0xbf'u8, 0xf6'u8, 0xaf'u8, 0x41'u8, 0x49'u8, 0xf5'u8, 0x1b'u8
+            ]
+            auth_message_in = "Cryptographic Forum Research Group"
+            auth_message_in_bytes: array[34, byte]
+
+            r_expected: array[16, byte] = [
+                0x85'u8, 0xd6'u8, 0xbe'u8, 0x78'u8, 0x57'u8, 0x55'u8, 0x6d'u8, 0x33'u8,
+                0x7f'u8, 0x44'u8, 0x52'u8, 0xfe'u8, 0x42'u8, 0xd5'u8, 0x06'u8, 0xa8'u8
+            ]
+            s_expected: array[16, byte] = [
+                0x01'u8, 0x03'u8, 0x80'u8, 0x8a'u8, 0xfb'u8, 0x0d'u8, 0xb2'u8, 0xfd'u8,
+                0x4a'u8, 0xbf'u8, 0xf6'u8, 0xaf'u8, 0x41'u8, 0x49'u8, 0xf5'u8, 0x1b'u8
+            ]
+            tag_expected: Tag = [
+                0xa8'u8, 0x06'u8, 0x1d'u8, 0xc1'u8, 0x30'u8, 0x51'u8, 0x36'u8, 0xc6'u8,
+                0xc2'u8, 0x2b'u8, 0x8b'u8, 0xaf'u8, 0x0c'u8, 0x01'u8, 0x27'u8, 0xa9'u8
+            ]
+        copyMem(auth_message_in_bytes[0].addr, auth_message_in[0].addr, 34)
+
+        poly_in.poly1305_init(key_in)
+        check(poly_in.r.toBytesLE()[0..15] == r_expected)
+        check(poly_in.s.toBytesLE()[0..15] == s_expected)
+
+        poly_in.poly1305_update(auth_message_in_bytes)
+        check(poly_in.tag == tag_expected)
+    test "poly_mac 2":
         var
             poly_in: Poly1305
             otk_in: Key = [
@@ -44,25 +94,3 @@ suite "poly1305_libsodium":
         poly_in.poly1305_init(otk_in)
         poly_in.poly1305_update(mac_data)
         check(poly_in.tag == tag_expected)
-        
-    test "simple test":
-        var
-            poly_in: Poly1305
-            key: Key = [
-                0x01'u8, 0x02'u8, 0x03'u8, 0x04'u8, 0x05'u8, 0x06'u8, 0x07'u8, 0x08'u8,
-                0x09'u8, 0x0a'u8, 0x0b'u8, 0x0c'u8, 0x0d'u8, 0x0e'u8, 0x0f'u8, 0x10'u8,
-                0x11'u8, 0x12'u8, 0x13'u8, 0x14'u8, 0x15'u8, 0x16'u8, 0x17'u8, 0x18'u8,
-                0x19'u8, 0x1a'u8, 0x1b'u8, 0x1c'u8, 0x1d'u8, 0x1e'u8, 0x1f'u8, 0x20'u8,
-            ]
-            data = "Hello, constant-time Poly1305!"
-        
-        poly_in.poly1305_init(key)
-        poly_in.poly1305_update(cast[seq[byte]](data))
-        
-        # Just check that we get a non-zero tag (actual correctness test is above)
-        var all_zero = true
-        for b in poly_in.tag:
-            if b != 0:
-                all_zero = false
-                break
-        check(not all_zero)
