@@ -8,6 +8,8 @@ import common, chacha20, poly1305, helpers
 type
     StreamCipher* = object
         chacha: ChaCha
+        keystream_buffer: Block
+        buffer_pos: int
         initialized*: bool
         finalized*: bool
 
@@ -37,10 +39,11 @@ proc initStreamCipher*(key: Key, nonce: Nonce, counter: Counter = 0): StreamCiph
     result.chacha.key = key
     result.chacha.nonce = nonce
     result.chacha.counter = counter
+    result.buffer_pos = 64  # Force initial keystream generation
     result.initialized = true
     result.finalized = false
 
-# SECURITY: Streaming encryption/decryption with bounds checking
+# SECURITY: Streaming encryption/decryption with proper state management
 proc update*(cipher: var StreamCipher, input: openArray[byte], output: var openArray[byte]) =
     # SECURITY: State validation
     if not cipher.initialized:
@@ -53,8 +56,17 @@ proc update*(cipher: var StreamCipher, input: openArray[byte], output: var openA
     if input.len == 0:
         return  # Nothing to process
     
-    # Use the already secure chacha20_xor implementation
-    cipher.chacha.chacha20_xor(input, output)
+    # Process input byte by byte using buffered keystream
+    for i in 0..<input.len:
+        # Generate new keystream block if needed
+        if cipher.buffer_pos >= 64:
+            cipher.chacha.chacha20_block(cipher.keystream_buffer)
+            cipher.chacha.counter.inc()
+            cipher.buffer_pos = 0
+        
+        # XOR with keystream
+        output[i] = input[i] xor cipher.keystream_buffer[cipher.buffer_pos]
+        cipher.buffer_pos.inc()
 
 # SECURITY: Safe streaming MAC initialization  
 proc initStreamMAC*(key: Key): StreamMAC =

@@ -45,7 +45,7 @@ A **security-hardened** pure Nim library implementing:
 - [x] xchacha20_poly1305
 	- [x] hchacha20_init
 	- [x] hchacha20
-- [~] streams - **SECURITY: Basic streaming cipher framework (needs counter state refinement)**
+- [x] streams - **SECURITY: Full streaming cipher with proper state management ✅**
 - [ ] factory that gives chacha(n) rounds  
 - [ ] add more test vectors
 - [x] make style more uniform - **SECURITY: Added comprehensive security documentation**
