@@ -7,8 +7,7 @@
 
 import unittest
 
-import nim_chacha20_poly1305/[common, chacha20 ]
-import stint
+import nim_chacha20_poly1305/[common, chacha20]
 
 suite "chacha20":
     test "quarter_round uint32 test vectors":
