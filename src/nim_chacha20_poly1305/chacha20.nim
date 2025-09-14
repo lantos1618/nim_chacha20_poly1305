@@ -87,28 +87,47 @@ proc chacha20_block*(
 
 
 
-# encrypt and decrypt block
+# SECURITY: Secure encrypt and decrypt with bounds checking
 proc chacha20_xor*(
     c: var ChaCha,
     source: openArray[byte],
     destination: var openArray[byte]
     ) =
+    # SECURITY: Verify buffer lengths match to prevent overflow
+    if source.len != destination.len:
+        raise newException(ValueError, "SECURITY: Source and destination lengths must match")
+    
+    if source.len == 0:
+        return  # Nothing to process
+    
     var 
         key_stream: Block
-        idx = 0
-    #  could reduce cycles?
-    for j in countup(0, (destination.len() div 64)-1, 64):
+        bytes_processed = 0
+    
+    # Process complete 64-byte blocks
+    while bytes_processed + 64 <= source.len:
         chacha20_block(c, key_stream)
         c.counter.inc()
+        
+        # SECURITY: Explicit bounds check before XOR
         for i in 0..63:
-            destination[idx] = source[idx] xor key_stream[i]
-            idx.inc()
-    if destination.len() mod 64 != 0:
+            let src_idx = bytes_processed + i
+            if src_idx >= source.len:
+                raise newException(IndexDefect, "SECURITY: Buffer overflow prevented")
+            destination[src_idx] = source[src_idx] xor key_stream[i]
+        
+        bytes_processed += 64
+    
+    # Process remaining bytes (< 64 bytes)
+    let remaining = source.len - bytes_processed
+    if remaining > 0:
         chacha20_block(c, key_stream)
         c.counter.inc()
-        for i in 0..(destination.high - (destination.len() div 64)*64):
-            destination[idx] = source[idx] xor key_stream[i]
-            idx.inc()
-    # for j in 0..((destination.len div 64)-1):
-    #     chacha20_block(c, key_stream)
+        
+        # SECURITY: Process only remaining bytes with bounds check
+        for i in 0..<remaining:
+            let src_idx = bytes_processed + i
+            if src_idx >= source.len or src_idx >= destination.len:
+                raise newException(IndexDefect, "SECURITY: Buffer overflow prevented")
+            destination[src_idx] = source[src_idx] xor key_stream[i]
 

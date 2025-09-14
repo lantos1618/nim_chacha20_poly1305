@@ -185,6 +185,22 @@ func poly_pad*(data: openArray[byte], x: int): seq[byte] =
     if data.len() mod x != 0:
         result.setLen(x - (data.len() mod x))
 
+# SECURITY: Constant-time MAC verification to prevent timing attacks
+proc poly1305_verify*(expected_tag: Tag, computed_tag: Tag): bool =
+    # SECURITY: Constant-time comparison to prevent timing side-channel attacks
+    var diff: byte = 0
+    for i in 0..<16:
+        diff = diff or (expected_tag[i] xor computed_tag[i])
+    result = diff == 0
+
+# SECURITY: Secure finalization that clears sensitive state
+proc poly1305_finalize*(poly: var Poly1305) =
+    # Clear sensitive key material from memory
+    for i in 0..4:
+        poly.r.limbs[i] = 0
+        poly.s.limbs[i] = 0
+        poly.a.limbs[i] = 0
+
 # Legacy compatibility
 proc poly1305_clamp*(poly: var Poly1305) =
     # Clamping is now handled internally
