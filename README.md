@@ -1,10 +1,15 @@
 
 # nim_chacha20_poly1305
-A pure nim library implementing:
-- Chacha20
-- poly1305
-- chacha20_poly1305
-- xchacha20_poly1305
+
+![Security Tests](https://github.com/lantos1618/nim_chacha20_poly1305/actions/workflows/security-tests.yml/badge.svg)
+[![Security Status](https://img.shields.io/badge/Security-HARDENED-brightgreen)](https://github.com/lantos1618/nim_chacha20_poly1305)
+[![Dependencies](https://img.shields.io/badge/Dependencies-ZERO-blue)](https://github.com/lantos1618/nim_chacha20_poly1305)
+
+A **security-hardened** pure Nim library implementing:
+- ChaCha20 stream cipher
+- Poly1305 message authentication  
+- ChaCha20-Poly1305 AEAD
+- XChaCha20-Poly1305 extended AEAD
 
 
 ## 🔒 SECURITY-HARDENED IMPLEMENTATION ✅
