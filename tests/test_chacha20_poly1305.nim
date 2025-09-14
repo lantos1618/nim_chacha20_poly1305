@@ -8,7 +8,6 @@
 import unittest
 
 import nim_chacha20_poly1305/[common, chacha20_poly1305]
-import stint
 import std/sysrand
 
 suite "chacha20_poly1305":
