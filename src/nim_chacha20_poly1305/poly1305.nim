@@ -162,23 +162,26 @@ proc poly1305_init*(poly: var Poly1305, key: Key) =
     poly.r = fromKey(key[0..15])
     poly.s = fromBytes(key[16..31])
 
-# Update with data
+# Update with data (process blocks)
 proc poly1305_update*(poly: var Poly1305, data: openArray[byte]) =
     var i = 0
     while i < data.len:
         let blockLen = min(16, data.len - i)
         let blockData = data[i..<i+blockLen]
-        
+
         let n = fromBytes(blockData)
         poly.a.add(n)
         poly.a = mulMod(poly.a, poly.r)
-        
+
         i += 16
-    
-    # Add s and finalize
+
+# Finalize and produce tag (add s value)
+proc poly1305_final*(poly: var Poly1305): Tag =
+    # Add s and produce final tag
     poly.a.add(poly.s)
     let tagBytes = poly.a.toBytes()
-    copyMem(poly.tag[0].addr, tagBytes[0].addr, 16)
+    copyMem(result[0].addr, tagBytes[0].addr, 16)
+    poly.tag = result
 
 # Padding function
 func poly_pad*(data: openArray[byte], x: int): seq[byte] =

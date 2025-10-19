@@ -54,7 +54,8 @@ suite "poly1305":
         check(poly_in.s.toBytesLE()[0..15] == s_expected)
 
         poly_in.poly1305_update(auth_message_in_bytes)
-        check(poly_in.tag == tag_expected)
+        let tag = poly_in.poly1305_final()
+        check(tag == tag_expected)
     test "poly_mac 2":
         var
             poly_in: Poly1305
@@ -93,4 +94,5 @@ suite "poly1305":
             ]
         poly_in.poly1305_init(otk_in)
         poly_in.poly1305_update(mac_data)
-        check(poly_in.tag == tag_expected)
+        let tag = poly_in.poly1305_final()
+        check(tag == tag_expected)

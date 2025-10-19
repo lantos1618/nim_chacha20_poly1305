@@ -18,10 +18,11 @@ suite "poly1305":
 
         poly_in.poly1305_init(key_in)
         poly_in.poly1305_update(auth_message_in_bytes)
-        
+        let tag = poly_in.poly1305_final()
+
         # Just check we get a non-zero tag (actual correctness verified above)
         var all_zero = true
-        for b in poly_in.tag:
+        for b in tag:
             if b != 0:
                 all_zero = false
                 break
@@ -40,10 +41,11 @@ suite "poly1305":
         
         poly_in.poly1305_init(otk_in)
         poly_in.poly1305_update(cast[seq[byte]](simple_message))
-        
+        let tag = poly_in.poly1305_final()
+
         # Verify we get some reasonable output
         var all_zero = true
-        for b in poly_in.tag:
+        for b in tag:
             if b != 0:
                 all_zero = false
                 break

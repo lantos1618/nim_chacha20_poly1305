@@ -23,7 +23,8 @@ suite "security_hardened":
         
         poly.poly1305_init(key)
         poly.poly1305_update(cast[seq[byte]]("test data"))
-        
+        discard poly.poly1305_final()  # Complete MAC computation
+
         # Verify keys are set
         var keys_nonzero = false
         for i in 0..4:
@@ -31,7 +32,7 @@ suite "security_hardened":
                 keys_nonzero = true
                 break
         check(keys_nonzero)
-        
+
         # Finalize should clear keys
         poly.poly1305_finalize()
         

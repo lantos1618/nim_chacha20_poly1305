@@ -67,7 +67,7 @@ proc chacha20_aead_poly1305*(
     mac_data = mac_data & @(uint64ToBytes(cipher_data.len.uint64))
 
     poly.poly1305_update(mac_data)
-    tag = poly.tag
+    tag = poly.poly1305_final()
 
 proc chacha20_aead_poly1305_encrypt*(
     key: Key,

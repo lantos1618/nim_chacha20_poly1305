@@ -83,20 +83,10 @@ proc update*(mac: var StreamMAC, data: openArray[byte]) =
         raise newException(ValueError, "SECURITY: MAC not initialized")
     if mac.finalized:
         raise newException(ValueError, "SECURITY: MAC already finalized")
-    
+
     if data.len > 0:
-        # Accumulate data instead of calling poly1305_update directly
-        # since poly1305_update finalizes immediately
-        var i = 0
-        while i < data.len:
-            let blockLen = min(16, data.len - i)
-            let blockData = data[i..<i+blockLen]
-            
-            let n = fromBytes(blockData)
-            mac.poly.a.add(n)
-            mac.poly.a = mulMod(mac.poly.a, mac.poly.r)
-            
-            i += 16
+        # Use the fixed poly1305_update which now correctly processes blocks without finalizing
+        mac.poly.poly1305_update(data)
 
 # SECURITY: MAC finalization with secure cleanup
 proc finalize*(mac: var StreamMAC): Tag =
@@ -104,14 +94,12 @@ proc finalize*(mac: var StreamMAC): Tag =
         raise newException(ValueError, "SECURITY: MAC not initialized")
     if mac.finalized:
         raise newException(ValueError, "SECURITY: MAC already finalized")
-    
-    # Complete MAC computation by adding s and converting to bytes
-    mac.poly.a.add(mac.poly.s)
-    let tagBytes = mac.poly.a.toBytes()
-    copyMem(result[0].addr, tagBytes[0].addr, 16)
-    
+
+    # Complete MAC computation using the fixed poly1305_final function
+    result = mac.poly.poly1305_final()
+
     mac.finalized = true
-    
+
     # SECURITY: Clear sensitive state
     mac.poly.poly1305_finalize()
 
