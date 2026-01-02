@@ -115,6 +115,11 @@ xchacha20_aead_poly1305_encrypt(
 
 ## 🌊 **Streaming API - For Large Data**
 
+> ⚠️ **SECURITY WARNING**: The streaming *decryption* API releases plaintext before tag verification.
+> This is fundamentally insecure for processing untrusted data streams incrementally.
+> **Use `streamDecrypt()` which buffers and verifies before returning.**
+> For true secure streaming of large files, implement a chunked protocol with per-chunk authentication.
+
 The streaming API allows memory-efficient processing of large data without loading everything into memory:
 
 ### Streaming Cipher (ChaCha20)

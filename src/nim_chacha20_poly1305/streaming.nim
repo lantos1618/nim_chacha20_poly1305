@@ -1,20 +1,27 @@
-# SECURITY-HARDENED Streaming ChaCha20-Poly1305 Implementation
-# Provides incremental encryption/decryption and MAC computation
-# Designed for processing large data streams without memory exhaustion
+# Streaming ChaCha20-Poly1305 Implementation
 #
-# ⚠️  SECURITY WARNING - CRYPTOGRAPHIC DOOM PRINCIPLE ⚠️
-# The low-level streaming API (updateCipherData) releases plaintext BEFORE
-# tag verification. This violates the "verify before you parse" principle.
-#
-# SAFE USAGE:
-#   - Use streamDecrypt() for complete messages (verifies tag before returning)
-#   - NEVER process output from updateCipherData() until verify() returns true
-#   - NEVER use decrypted data for parsing, allocation, or logic before verification
-#
-# UNSAFE USAGE (vulnerable to chosen-ciphertext attacks):
-#   - Processing updateCipherData() output immediately (e.g., parsing headers)
-#   - Allocating memory based on unverified decrypted data
-#   - Executing commands or logic based on unverified plaintext
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  🚨 CRITICAL SECURITY WARNING - READ BEFORE USING STREAMING DECRYPT 🚨  ║
+# ╠══════════════════════════════════════════════════════════════════════════╣
+# ║                                                                          ║
+# ║  The streaming decryption API (updateCipherData in decrypt mode)         ║
+# ║  releases UNVERIFIED plaintext. This violates the Cryptographic          ║
+# ║  Doom Principle and is INSECURE for untrusted data streams.              ║
+# ║                                                                          ║
+# ║  SAFE:                                                                   ║
+# ║    ✅ streamDecrypt() - verifies tag, then returns plaintext             ║
+# ║    ✅ Streaming ENCRYPTION (updateCipherData with encrypt=true)          ║
+# ║    ✅ Buffer ALL output, call verify(), THEN process if true             ║
+# ║                                                                          ║
+# ║  UNSAFE (enables chosen-ciphertext attacks):                             ║
+# ║    ❌ Processing updateCipherData() output before verify()               ║
+# ║    ❌ Writing chunks to disk/network before final verification           ║
+# ║    ❌ Parsing, executing, or allocating based on unverified data         ║
+# ║                                                                          ║
+# ║  For secure large-file decryption, use a CHUNKED protocol where          ║
+# ║  each chunk has its own authentication tag (like libsodium secretstream) ║
+# ║                                                                          ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
 
 import common, chacha20, poly1305, helpers
 
@@ -194,14 +201,21 @@ proc finalizeAuthData*(aead: var StreamAEAD) =
     aead.auth_data_processed = true
 
 # SECURITY: Streaming AEAD cipher data processing
-# ⚠️  WARNING: In decrypt mode, output contains UNVERIFIED plaintext!
-# DO NOT process, parse, or act on this data until verify() returns true.
-# Violating this rule enables chosen-ciphertext attacks.
+# ╔═══════════════════════════════════════════════════════════════════════╗
+# ║ 🚨 DECRYPT MODE WARNING: Output contains UNVERIFIED plaintext!        ║
+# ║ DO NOT process, parse, or act on this data until verify() = true.    ║
+# ║ For safe decryption, use streamDecrypt() instead.                    ║
+# ╚═══════════════════════════════════════════════════════════════════════╝
 proc updateCipherData*(aead: var StreamAEAD, input: openArray[byte], output: var openArray[byte]) =
     if not aead.initialized:
         raise newException(ValueError, "SECURITY: AEAD not initialized")
     if aead.finalized:
         raise newException(ValueError, "SECURITY: AEAD already finalized")
+
+    # Emit compile-time warning for decrypt mode usage
+    when defined(warnStreamingDecrypt):
+        if not aead.encrypt_mode:
+            {.warning: "updateCipherData in decrypt mode releases UNVERIFIED plaintext - use streamDecrypt() for safety".}
     
     # Ensure auth data phase is complete
     aead.finalizeAuthData()
