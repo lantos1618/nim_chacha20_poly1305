@@ -1,29 +1,12 @@
-# This is just an example to get you started. You may wish to put all of your
-# tests into a single file, or separate them into multiple `test1`, `test2`
-# etc. files (better names are recommended, just make sure the name starts with
-# the letter 't').
-#
-# To run these tests, simply execute `nimble test`.
+# Poly1305 MAC tests
+# Tests the Poly130-based constant-time implementation
 
 import unittest
-
 import nim_chacha20_poly1305/[common, poly1305]
-import stint
 
 suite "poly1305":
-    test "poly1305_clamp":
-        var
-            poly_in: Poly1305
-            r_expected = "806d5400e52447c036d555408bed685"
-
-        poly_in.r = fromBytes(UInt256, [
-            0x85'u8, 0xd6'u8, 0xbe'u8, 0x78'u8, 0x57'u8, 0x55'u8, 0x6d'u8, 0x33'u8,
-            0x7f'u8, 0x44'u8, 0x52'u8, 0xfe'u8, 0x42'u8, 0xd5'u8, 0x06'u8, 0xa8'u8
-        ])
-        poly_in.poly1305_clamp()
-        check(poly_in.r.toHex() == r_expected)
-
-    test "poly_mac":
+    test "poly_mac - RFC 7539 Test Vector":
+        # Test vector from RFC 7539 Section 2.5.2
         var
             poly_in: Poly1305
             key_in: Key = [
@@ -35,14 +18,6 @@ suite "poly1305":
             auth_message_in = "Cryptographic Forum Research Group"
             auth_message_in_bytes: array[34, byte]
 
-            r_expected: array[16, byte] = [
-                0x85'u8, 0xd6'u8, 0xbe'u8, 0x78'u8, 0x57'u8, 0x55'u8, 0x6d'u8, 0x33'u8,
-                0x7f'u8, 0x44'u8, 0x52'u8, 0xfe'u8, 0x42'u8, 0xd5'u8, 0x06'u8, 0xa8'u8
-            ]
-            s_expected: array[16, byte] = [
-                0x01'u8, 0x03'u8, 0x80'u8, 0x8a'u8, 0xfb'u8, 0x0d'u8, 0xb2'u8, 0xfd'u8,
-                0x4a'u8, 0xbf'u8, 0xf6'u8, 0xaf'u8, 0x41'u8, 0x49'u8, 0xf5'u8, 0x1b'u8
-            ]
             tag_expected: Tag = [
                 0xa8'u8, 0x06'u8, 0x1d'u8, 0xc1'u8, 0x30'u8, 0x51'u8, 0x36'u8, 0xc6'u8,
                 0xc2'u8, 0x2b'u8, 0x8b'u8, 0xaf'u8, 0x0c'u8, 0x01'u8, 0x27'u8, 0xa9'u8
@@ -50,13 +25,12 @@ suite "poly1305":
         copyMem(auth_message_in_bytes[0].addr, auth_message_in[0].addr, 34)
 
         poly_in.poly1305_init(key_in)
-        check(poly_in.r.toBytesLE()[0..15] == r_expected)
-        check(poly_in.s.toBytesLE()[0..15] == s_expected)
-
         poly_in.poly1305_update(auth_message_in_bytes)
         let tag = poly_in.poly1305_final()
         check(tag == tag_expected)
-    test "poly_mac 2":
+
+    test "poly_mac - RFC 7539 AEAD Test Vector":
+        # Test vector from RFC 7539 Section 2.8.2
         var
             poly_in: Poly1305
             otk_in: Key = [
@@ -96,3 +70,70 @@ suite "poly1305":
         poly_in.poly1305_update(mac_data)
         let tag = poly_in.poly1305_final()
         check(tag == tag_expected)
+
+    test "poly1305_verify - constant time comparison":
+        var tag1: Tag = [0x01'u8, 0x02'u8, 0x03'u8, 0x04'u8, 0x05'u8, 0x06'u8, 0x07'u8, 0x08'u8,
+                         0x09'u8, 0x0a'u8, 0x0b'u8, 0x0c'u8, 0x0d'u8, 0x0e'u8, 0x0f'u8, 0x10'u8]
+        var tag2 = tag1
+        var tag3: Tag = [0x00'u8, 0x02'u8, 0x03'u8, 0x04'u8, 0x05'u8, 0x06'u8, 0x07'u8, 0x08'u8,
+                         0x09'u8, 0x0a'u8, 0x0b'u8, 0x0c'u8, 0x0d'u8, 0x0e'u8, 0x0f'u8, 0x10'u8]
+
+        check(poly1305_verify(tag1, tag2) == true)
+        check(poly1305_verify(tag1, tag3) == false)
+
+    test "poly1305 - streaming update":
+        # Test that multiple updates produce same result as single update
+        var key: Key = [
+            0x85'u8, 0xd6'u8, 0xbe'u8, 0x78'u8, 0x57'u8, 0x55'u8, 0x6d'u8, 0x33'u8,
+            0x7f'u8, 0x44'u8, 0x52'u8, 0xfe'u8, 0x42'u8, 0xd5'u8, 0x06'u8, 0xa8'u8,
+            0x01'u8, 0x03'u8, 0x80'u8, 0x8a'u8, 0xfb'u8, 0x0d'u8, 0xb2'u8, 0xfd'u8,
+            0x4a'u8, 0xbf'u8, 0xf6'u8, 0xaf'u8, 0x41'u8, 0x49'u8, 0xf5'u8, 0x1b'u8
+        ]
+
+        let message = "Cryptographic Forum Research Group"
+        var msg_bytes: array[34, byte]
+        copyMem(msg_bytes[0].addr, message[0].unsafeAddr, 34)
+
+        # Single update
+        var poly1: Poly1305
+        poly1.poly1305_init(key)
+        poly1.poly1305_update(msg_bytes)
+        let tag1 = poly1.poly1305_final()
+
+        # Multiple updates (byte by byte)
+        var poly2: Poly1305
+        poly2.poly1305_init(key)
+        for i in 0..<34:
+            poly2.poly1305_update([msg_bytes[i]])
+        let tag2 = poly2.poly1305_final()
+
+        # Multiple updates (chunks)
+        var poly3: Poly1305
+        poly3.poly1305_init(key)
+        poly3.poly1305_update(msg_bytes[0..<10])
+        poly3.poly1305_update(msg_bytes[10..<20])
+        poly3.poly1305_update(msg_bytes[20..<34])
+        let tag3 = poly3.poly1305_final()
+
+        check(tag1 == tag2)
+        check(tag1 == tag3)
+
+    test "poly1305 - empty message":
+        var key: Key = [
+            0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
+            0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
+            0x01'u8, 0x02'u8, 0x03'u8, 0x04'u8, 0x05'u8, 0x06'u8, 0x07'u8, 0x08'u8,
+            0x09'u8, 0x0a'u8, 0x0b'u8, 0x0c'u8, 0x0d'u8, 0x0e'u8, 0x0f'u8, 0x10'u8
+        ]
+
+        var poly: Poly1305
+        poly.poly1305_init(key)
+        # No update - empty message
+        let tag = poly.poly1305_final()
+
+        # With r=0, tag should equal s
+        let expected: Tag = [
+            0x01'u8, 0x02'u8, 0x03'u8, 0x04'u8, 0x05'u8, 0x06'u8, 0x07'u8, 0x08'u8,
+            0x09'u8, 0x0a'u8, 0x0b'u8, 0x0c'u8, 0x0d'u8, 0x0e'u8, 0x0f'u8, 0x10'u8
+        ]
+        check(tag == expected)
