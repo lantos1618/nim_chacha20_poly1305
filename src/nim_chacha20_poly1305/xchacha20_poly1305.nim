@@ -4,7 +4,7 @@
 # https://tools.ietf.org/id/draft-irtf-cfrg-xchacha-03.html
 # https://www.ietf.org/archive/id/draft-irtf-cfrg-xchacha-03.txt
 
-import common, chacha20_poly1305, chacha20
+import common, chacha20_poly1305, chacha20, helpers
 
 type
     # extended key nonce
@@ -41,6 +41,9 @@ proc hchacha20*(key: Key, xnonce: XKNonce): Key  =
     copyMem(result[0].addr, t_state[0].addr, 16)
     copyMem(result[16].addr, t_state[12].addr, 16)
 
+    # SECURITY: Clear sensitive intermediate state from stack
+    secureZeroArray(t_state)
+
 proc xchacha20_init(key: Key, nonce: XNonce): XKN =
     # SECURITY: Validate input lengths
     if key.len != 32:
@@ -67,7 +70,7 @@ proc xchacha20_init(key: Key, nonce: XNonce): XKN =
 proc xchacha20*(
     key: Key,
     nonce: XNonce,
-    counter:var Counter = 0,
+    counter: var Counter = 0,
     plain_data: openArray[byte],
     cipher_data: var openArray[byte]) =
     var
@@ -80,17 +83,26 @@ proc xchacha20*(
     xkn = xchacha20_init(key, nonce)
     c.key = xkn.sub_key
     c.nonce = xkn.sub_nonce
-    c.counter = counter # probably don't let user set this
+    c.counter = counter
     c.chacha20_xor(plain_data, cipher_data)
+
+    # CRITICAL: Update caller's counter so subsequent calls don't reuse keystream
+    counter = c.counter
+
+    # SECURITY: Clear sensitive key material from stack
+    secureZeroArray(xkn.sub_key)
+    secureZeroArray(c.key)
+    secureZeroArray(c.state)
+    secureZeroArray(c.initial_state)
 
 proc xchacha20_aead_poly1305_encrypt*(
     key: Key,
     nonce: XNonce,
-    counter:var Counter = 0,
+    counter: var Counter = 0,
     auth_data: openArray[byte],
     plain_data: var openArray[byte],
     cipher_data: var openArray[byte],
-    tag:var Tag
+    tag: var Tag
     ) =
     var
         xkn: XKN
@@ -104,16 +116,18 @@ proc xchacha20_aead_poly1305_encrypt*(
         cipher_data,
         tag
     )
+    # SECURITY: Clear sensitive sub-key from stack
+    secureZeroArray(xkn.sub_key)
 
 proc xchacha20_aead_poly1305_decrypt*(
     key: Key,
     nonce: XNonce,
-    counter:var Counter = 0,
+    counter: var Counter = 0,
     auth_data: openArray[byte],
     plain_data: var openArray[byte],
     cipher_data: var openArray[byte],
-    tag:var Tag
-    ) =
+    tag: var Tag
+    ) {.deprecated: "Use xchacha20_aead_poly1305_decrypt_verified for secure decryption".} =
     var
         xkn: XKN
     xkn = xchacha20_init(key, nonce)
@@ -126,3 +140,29 @@ proc xchacha20_aead_poly1305_decrypt*(
         cipher_data,
         tag
     )
+    # SECURITY: Clear sensitive sub-key from stack
+    secureZeroArray(xkn.sub_key)
+
+# SECURITY: Verified decryption that checks tag BEFORE releasing plaintext
+proc xchacha20_aead_poly1305_decrypt_verified*(
+    key: Key,
+    nonce: XNonce,
+    counter: var Counter = 0,
+    auth_data: openArray[byte],
+    cipher_data: openArray[byte],
+    plain_data: var openArray[byte],
+    expected_tag: Tag): bool =
+    var
+        xkn: XKN
+    xkn = xchacha20_init(key, nonce)
+    result = chacha20_aead_poly1305_decrypt_verified(
+        xkn.sub_key,
+        xkn.sub_nonce,
+        counter,
+        auth_data,
+        cipher_data,
+        plain_data,
+        expected_tag
+    )
+    # SECURITY: Clear sensitive sub-key from stack
+    secureZeroArray(xkn.sub_key)

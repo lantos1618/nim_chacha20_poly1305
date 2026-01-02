@@ -81,10 +81,14 @@ proc update*(cipher: var StreamCipher, input: openArray[byte], output: var openA
     for i in 0..<input.len:
         # Generate new keystream block if needed
         if cipher.buffer_pos >= 64:
+            # SECURITY: Check for counter overflow before generating new block
+            # RFC 7539: "If the counter overflows, the program MUST stop"
+            if cipher.chacha.counter == high(uint32):
+                raise newException(ValueError, "SECURITY: Counter overflow - maximum message size exceeded (256 GB)")
             cipher.chacha.chacha20_block(cipher.keystream_buffer)
             cipher.chacha.counter.inc()
             cipher.buffer_pos = 0
-        
+
         # XOR with keystream
         output[i] = input[i] xor cipher.keystream_buffer[cipher.buffer_pos]
         cipher.buffer_pos.inc()
