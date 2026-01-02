@@ -61,15 +61,26 @@ proc bytesToString*(data: openArray[byte]): string =
         else:
             result[i] = '?'  # Replace non-printable with ?
 
-# SECURITY: Constant-time memory comparison 
+# SECURITY: Constant-time memory comparison
+# NOTE: Length comparison is NOT constant-time. This is acceptable for
+# fixed-size values (tags, keys, hashes) but reveals length for variable data.
+# For fixed-size comparisons (like MAC tags), use constantTimeEqualsFixed.
 proc constantTimeEquals*(a, b: openArray[byte]): bool =
     if a.len != b.len:
         return false
-    
+
     var diff: byte = 0
     for i in 0..<a.len:
         diff = diff or (a[i] xor b[i])
-    
+
+    result = diff == 0
+
+# SECURITY: Fully constant-time comparison for fixed-size arrays
+# Both execution time and result are independent of input values
+proc constantTimeEqualsFixed*[N: static int](a, b: array[N, byte]): bool =
+    var diff: byte = 0
+    for i in 0..<N:
+        diff = diff or (a[i] xor b[i])
     result = diff == 0
 
 # SECURITY: Secure memory clearing with DSE prevention

@@ -1,6 +1,20 @@
-# SECURITY-HARDENED Streaming ChaCha20-Poly1305 Implementation  
+# SECURITY-HARDENED Streaming ChaCha20-Poly1305 Implementation
 # Provides incremental encryption/decryption and MAC computation
 # Designed for processing large data streams without memory exhaustion
+#
+# ⚠️  SECURITY WARNING - CRYPTOGRAPHIC DOOM PRINCIPLE ⚠️
+# The low-level streaming API (updateCipherData) releases plaintext BEFORE
+# tag verification. This violates the "verify before you parse" principle.
+#
+# SAFE USAGE:
+#   - Use streamDecrypt() for complete messages (verifies tag before returning)
+#   - NEVER process output from updateCipherData() until verify() returns true
+#   - NEVER use decrypted data for parsing, allocation, or logic before verification
+#
+# UNSAFE USAGE (vulnerable to chosen-ciphertext attacks):
+#   - Processing updateCipherData() output immediately (e.g., parsing headers)
+#   - Allocating memory based on unverified decrypted data
+#   - Executing commands or logic based on unverified plaintext
 
 import common, chacha20, poly1305, helpers
 
@@ -68,7 +82,16 @@ proc update*(cipher: var StreamCipher, input: openArray[byte], output: var openA
         output[i] = input[i] xor cipher.keystream_buffer[cipher.buffer_pos]
         cipher.buffer_pos.inc()
 
-# SECURITY: Safe streaming MAC initialization  
+# SECURITY: Finalize streaming cipher and clear sensitive state
+proc finalize*(cipher: var StreamCipher) =
+    if cipher.initialized:
+        secureZeroArray(cipher.chacha.key)
+        secureZeroArray(cipher.chacha.state)
+        secureZeroArray(cipher.chacha.initial_state)
+        secureZero(cipher.keystream_buffer)
+        cipher.finalized = true
+
+# SECURITY: Safe streaming MAC initialization
 proc initStreamMAC*(key: Key): StreamMAC =
     if key.len != 32:
         raise newException(ValueError, "SECURITY: Key must be exactly 32 bytes")
@@ -125,17 +148,20 @@ proc initStreamAEAD*(key: Key, nonce: Nonce, encrypt: bool, counter: Counter = 0
     temp_chacha.chacha20_block(key_block)
     copyMem(otk[0].addr, key_block[0].addr, 32)
     
-    # SECURITY: Clear temporary key block
+    # SECURITY: Clear temporary key block and chacha state
     secureZero(key_block)
-    
+    secureZeroArray(temp_chacha.key)
+    secureZeroArray(temp_chacha.state)
+    secureZeroArray(temp_chacha.initial_state)
+
     result.mac = initStreamMAC(otk)
     result.encrypt_mode = encrypt
     result.auth_data_processed = false
     result.cipher_data_len = 0
-    result.auth_data_len = 0 
+    result.auth_data_len = 0
     result.initialized = true
     result.finalized = false
-    
+
     # SECURITY: Clear OTK from stack
     secureZero(otk)
 
@@ -167,7 +193,10 @@ proc finalizeAuthData*(aead: var StreamAEAD) =
     
     aead.auth_data_processed = true
 
-# SECURITY: Streaming AEAD cipher data processing  
+# SECURITY: Streaming AEAD cipher data processing
+# ⚠️  WARNING: In decrypt mode, output contains UNVERIFIED plaintext!
+# DO NOT process, parse, or act on this data until verify() returns true.
+# Violating this rule enables chosen-ciphertext attacks.
 proc updateCipherData*(aead: var StreamAEAD, input: openArray[byte], output: var openArray[byte]) =
     if not aead.initialized:
         raise newException(ValueError, "SECURITY: AEAD not initialized")
@@ -226,9 +255,10 @@ proc finalize*(aead: var StreamAEAD): Tag =
     # Finalize MAC
     result = aead.mac.finalize()
     aead.finalized = true
-    
-    # SECURITY: Clear length block
+
+    # SECURITY: Clear length block and cipher state
     secureZero(length_block)
+    aead.cipher.finalize()
 
 # SECURITY: Verify MAC in constant time for streaming AEAD
 proc verify*(aead: var StreamAEAD, expected_tag: Tag): bool =

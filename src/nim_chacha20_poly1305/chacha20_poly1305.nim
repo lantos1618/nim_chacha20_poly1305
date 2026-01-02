@@ -55,6 +55,12 @@ proc chacha20_poly1305_key_gen*(
     chacha20_block(temp_c, key_block)
     copyMem(result[0].addr, key_block[0].addr, 32)
 
+    # SECURITY: Clear sensitive state from stack
+    secureZero(key_block)
+    secureZeroArray(temp_c.key)
+    secureZeroArray(temp_c.state)
+    secureZeroArray(temp_c.initial_state)
+
 
 # encrypt and dcrypt
 # be sure to check tag_encrypt == tag_decrypt 
@@ -93,8 +99,11 @@ proc chacha20_aead_poly1305*(
 
     tag = poly.poly1305_final()
 
-    # SECURITY: Clear sensitive key material
+    # SECURITY: Clear ALL sensitive key material from stack
     secureZeroArray(otk)
+    secureZeroArray(temp_c.key)
+    secureZeroArray(temp_c.state)
+    secureZeroArray(temp_c.initial_state)
     poly.poly1305_finalize()
 
 proc chacha20_aead_poly1305_encrypt*(
@@ -197,7 +206,10 @@ proc chacha20_aead_poly1305_decrypt_verified*(
     temp_c.counter = temp_counter
     chacha20_xor(temp_c, cipher_data, plain_data)
 
-    # SECURITY: Clear sensitive key material
+    # SECURITY: Clear ALL sensitive key material from stack
     secureZeroArray(otk)
+    secureZeroArray(temp_c.key)
+    secureZeroArray(temp_c.state)
+    secureZeroArray(temp_c.initial_state)
 
     return true

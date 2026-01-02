@@ -4,6 +4,11 @@ import common
 # chacha20
 # https://datatracker.ietf.org/doc/html/rfc7539
 
+# SECURITY: Maximum message size per RFC 7539 (2^38 - 64 bytes ≈ 274 GB)
+# With 32-bit counter at 64 bytes/block: 2^32 * 64 = 256 GB
+const
+    MAX_BLOCKS* = 0xFFFFFFFF'u32  # Maximum blocks before counter overflow
+
 type
     ChaCha* = object
         key*: Key
@@ -96,14 +101,21 @@ proc chacha20_xor*(
     # SECURITY: Verify buffer lengths match to prevent overflow
     if source.len != destination.len:
         raise newException(ValueError, "SECURITY: Source and destination lengths must match")
-    
+
     if source.len == 0:
         return  # Nothing to process
-    
-    var 
+
+    # SECURITY: Check for counter overflow before processing
+    # Calculate number of blocks needed
+    let blocks_needed = uint64((source.len + 63) div 64)
+    let counter_headroom = uint64(MAX_BLOCKS) - uint64(c.counter)
+    if blocks_needed > counter_headroom:
+        raise newException(ValueError, "SECURITY: Message too large - would cause counter overflow and keystream reuse")
+
+    var
         key_stream: Block
         bytes_processed = 0
-    
+
     # Process complete 64-byte blocks
     while bytes_processed + 64 <= source.len:
         chacha20_block(c, key_stream)
