@@ -72,7 +72,24 @@ proc constantTimeEquals*(a, b: openArray[byte]): bool =
     
     result = diff == 0
 
-# SECURITY: Secure memory clearing
+# SECURITY: Secure memory clearing with DSE prevention
+# Uses volatile writes to prevent Dead Store Elimination by the compiler
 proc secureZero*[T](data: var openArray[T]) =
+    # Use volatile pointer to prevent compiler from optimizing away the writes
+    {.push stackTrace:off.}
     for i in 0..<data.len:
-        data[i] = T(0)
+        let p = cast[ptr T](addr data[i])
+        {.emit: ["*((volatile ", T, "*)(",  p, ")) = 0;"].}
+    {.pop.}
+
+# SECURITY: Secure zero for fixed-size arrays using volatile writes
+proc secureZeroArray*[N: static int, T](data: var array[N, T]) =
+    {.push stackTrace:off.}
+    for i in 0..<N:
+        let p = cast[ptr T](addr data[i])
+        {.emit: ["*((volatile ", T, "*)(",  p, ")) = 0;"].}
+    {.pop.}
+
+# SECURITY: Memory barrier to prevent reordering
+proc memoryBarrier*() {.inline.} =
+    {.emit: "__asm__ __volatile__(\"\" ::: \"memory\");".}

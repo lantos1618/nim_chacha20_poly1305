@@ -3,6 +3,7 @@
 # https://datatracker.ietf.org/doc/html/rfc7539
 
 import common
+import helpers
 
 # 130-bit number represented as 5 x 32-bit limbs (26-bit each except last)
 type
@@ -12,43 +13,55 @@ type
 const
     MASK26* = (1'u64 shl 26) - 1  # 0x3ffffff
 
-# Convert bytes to Poly130 (little-endian)
+# Convert bytes to Poly130 (little-endian) with 0x01 padding for message blocks
+# The 130-bit representation: 5 limbs of 26 bits each
+# Input: up to 16 data bytes + implicit 0x01 padding byte at position len
 proc fromBytes*(data: openArray[byte]): Poly130 =
     var padded: array[17, byte]  # Max 16 bytes + 1 padding byte
     let len = min(data.len, 16)
-    
+
     # Copy data
     for i in 0..<len:
         padded[i] = data[i]
-    
-    # Add padding bit if needed
-    if len < 17:
-        padded[len] = 0x01
-    
+
+    # Add padding bit (0x01) at position len
+    padded[len] = 0x01
+
     # Convert to 64-bit words (little-endian)
+    # t0 = bytes 0-7 (bits 0-63)
+    # t1 = bytes 8-15 (bits 64-127)
+    # hibit = byte 16 (the 0x01 padding, provides bit 128)
     var t0, t1: uint64
     for i in 0..7:
         t0 = t0 or (uint64(padded[i]) shl (i * 8))
-    for i in 8..16:
-        t1 = t1 or (uint64(padded[i]) shl ((i-8) * 8))
-    
-    # Split into 26-bit limbs
-    result.limbs[0] = t0 and MASK26
-    result.limbs[1] = ((t0 shr 26) or (t1 shl 38)) and MASK26
-    result.limbs[2] = (t1 shr 14) and MASK26
-    result.limbs[3] = (t1 shr 40) and MASK26
-    result.limbs[4] = t1 shr 66
+    for i in 0..7:
+        t1 = t1 or (uint64(padded[i + 8]) shl (i * 8))
+    let hibit = uint64(padded[16])  # 0x01 for full blocks, 0x01 for partial too
 
-# Convert key bytes to clamped Poly130
+    # Split into 26-bit limbs
+    # 130 bits total: limbs[0..4] each hold 26 bits
+    # Bit layout:
+    #   limbs[0] = bits 0-25
+    #   limbs[1] = bits 26-51
+    #   limbs[2] = bits 52-77
+    #   limbs[3] = bits 78-103
+    #   limbs[4] = bits 104-129
+    result.limbs[0] = t0 and MASK26
+    result.limbs[1] = (t0 shr 26) and MASK26
+    result.limbs[2] = ((t0 shr 52) or (t1 shl 12)) and MASK26
+    result.limbs[3] = (t1 shr 14) and MASK26
+    result.limbs[4] = (t1 shr 40) or (hibit shl 24)
+
+# Convert key bytes to clamped Poly130 (r value, 124 bits after clamping)
 proc fromKey*(key: openArray[byte]): Poly130 =
     var padded: array[16, byte]
     let len = min(key.len, 16)
-    
+
     # Copy key data
     for i in 0..<len:
         padded[i] = key[i]
-    
-    # Apply clamping
+
+    # Apply clamping per RFC 8439
     padded[3] = padded[3] and 0x0f
     padded[7] = padded[7] and 0x0f
     padded[11] = padded[11] and 0x0f
@@ -56,19 +69,45 @@ proc fromKey*(key: openArray[byte]): Poly130 =
     padded[4] = padded[4] and 0xfc
     padded[8] = padded[8] and 0xfc
     padded[12] = padded[12] and 0xfc
-    
-    # Convert to limbs
+
+    # Convert to 64-bit words (little-endian)
     var t0, t1: uint64
     for i in 0..7:
         t0 = t0 or (uint64(padded[i]) shl (i * 8))
-    for i in 8..15:
-        t1 = t1 or (uint64(padded[i]) shl ((i-8) * 8))
-    
+    for i in 0..7:
+        t1 = t1 or (uint64(padded[i + 8]) shl (i * 8))
+
+    # Split into 26-bit limbs (128-bit value, no padding)
     result.limbs[0] = t0 and MASK26
-    result.limbs[1] = ((t0 shr 26) or (t1 shl 38)) and MASK26  
-    result.limbs[2] = (t1 shr 14) and MASK26
-    result.limbs[3] = (t1 shr 40) and MASK26
-    result.limbs[4] = t1 shr 66
+    result.limbs[1] = (t0 shr 26) and MASK26
+    result.limbs[2] = ((t0 shr 52) or (t1 shl 12)) and MASK26
+    result.limbs[3] = (t1 shr 14) and MASK26
+    result.limbs[4] = (t1 shr 40)  # Only 24 bits here after clamping
+
+# Convert 16-byte s value to Poly130 (NO padding - raw 128-bit value)
+# This is used for the s part of the key, which is added to the accumulator
+# at the end of Poly1305. Unlike message blocks, s has no padding byte.
+proc fromS*(data: openArray[byte]): Poly130 =
+    var padded: array[16, byte]
+    let len = min(data.len, 16)
+
+    # Copy data (NO padding byte for s value!)
+    for i in 0..<len:
+        padded[i] = data[i]
+
+    # Convert to 64-bit words (little-endian)
+    var t0, t1: uint64
+    for i in 0..7:
+        t0 = t0 or (uint64(padded[i]) shl (i * 8))
+    for i in 0..7:
+        t1 = t1 or (uint64(padded[i + 8]) shl (i * 8))
+
+    # Split into 26-bit limbs (128-bit value, no 0x01 padding)
+    result.limbs[0] = t0 and MASK26
+    result.limbs[1] = (t0 shr 26) and MASK26
+    result.limbs[2] = ((t0 shr 52) or (t1 shl 12)) and MASK26
+    result.limbs[3] = (t1 shr 14) and MASK26
+    result.limbs[4] = (t1 shr 40)  # Only 24 bits (bits 104-127)
 
 # Add two Poly130 numbers
 proc add*(a: var Poly130, b: Poly130) =
@@ -92,64 +131,108 @@ proc ctSub*(a: var Poly130, b: Poly130) =
         a.limbs[i] = (a.limbs[i] and (not mask)) or (temp[i] and mask)
 
 # Multiply and reduce modulo 2^130-5
+# SECURITY: Fully constant-time implementation - no data-dependent branches
 proc mulMod*(a: Poly130, b: Poly130): Poly130 =
     # Schoolbook multiplication
     var c: array[9, uint64]  # Product can be up to 260 bits
-    
+
     for i in 0..4:
         for j in 0..4:
             c[i+j] += a.limbs[i] * b.limbs[j]
-    
+
     # Reduce modulo 2^130-5
     # For terms >= 2^130, multiply by 5 and add to lower terms
     for i in countdown(8, 5):
         c[i-5] += c[i] * 5
         c[i] = 0
-    
+
     # Carry propagation with normalization to 26-bit limbs
     var carry: uint64 = 0
     for i in 0..4:
         c[i] += carry
         result.limbs[i] = c[i] and MASK26
         carry = c[i] shr 26
-    
-    # Final reduction if needed
-    if carry > 0:
-        result.limbs[0] += carry * 5
-        # Propagate any additional carry
-        carry = result.limbs[0] shr 26
-        result.limbs[0] = result.limbs[0] and MASK26
-        for i in 1..4:
-            if carry == 0:
-                break
-            result.limbs[i] += carry
-            carry = result.limbs[i] shr 26
-            result.limbs[i] = result.limbs[i] and MASK26
+
+    # SECURITY: Branchless final reduction
+    # Always perform carry * 5 addition (carry may be 0, which is fine)
+    result.limbs[0] += carry * 5
+
+    # SECURITY: Always propagate carries through ALL limbs - no early exit
+    # This ensures constant-time execution regardless of data values
+    carry = result.limbs[0] shr 26
+    result.limbs[0] = result.limbs[0] and MASK26
+
+    result.limbs[1] += carry
+    carry = result.limbs[1] shr 26
+    result.limbs[1] = result.limbs[1] and MASK26
+
+    result.limbs[2] += carry
+    carry = result.limbs[2] shr 26
+    result.limbs[2] = result.limbs[2] and MASK26
+
+    result.limbs[3] += carry
+    carry = result.limbs[3] shr 26
+    result.limbs[3] = result.limbs[3] and MASK26
+
+    result.limbs[4] += carry
+    # No need to mask limbs[4] as it can hold slightly more than 26 bits
+    # Final reduction in toBytes() handles this via ctSub
 
 # Convert to bytes (little-endian, 16 bytes)
+# Reconstructs 128-bit value from 5 x 26-bit limbs
 proc toBytes*(p: Poly130): array[16, byte] =
-    # First normalize to ensure proper reduction
     var temp = p
-    
-    # Final constant-time reduction
+
+    # First, normalize limbs by propagating carries
+    # This is necessary because add() doesn't normalize
+    var carry: uint64 = 0
+    for i in 0..3:
+        temp.limbs[i] += carry
+        carry = temp.limbs[i] shr 26
+        temp.limbs[i] = temp.limbs[i] and MASK26
+    temp.limbs[4] += carry
+
+    # Handle wrap-around: if limbs[4] >= 2^26, reduce mod 2^130-5
+    # Since 2^130 ≡ 5 (mod 2^130-5), carry from limbs[4] multiplies by 5
+    carry = temp.limbs[4] shr 26
+    temp.limbs[4] = temp.limbs[4] and MASK26
+    temp.limbs[0] += carry * 5
+
+    # Propagate any new carries
+    carry = temp.limbs[0] shr 26
+    temp.limbs[0] = temp.limbs[0] and MASK26
+    for i in 1..4:
+        temp.limbs[i] += carry
+        carry = temp.limbs[i] shr 26
+        temp.limbs[i] = temp.limbs[i] and MASK26
+
+    # Final constant-time reduction modulo 2^130-5
+    # If accumulator >= 2^130-5, subtract it
+    # 2^130 - 5 in binary: all 130 bits set except bit 2
     var p_prime: Poly130
-    p_prime.limbs[0] = MASK26 - 5
+    p_prime.limbs[0] = MASK26 - 4  # 2^26 - 5 = (2^26-1) - 4
     p_prime.limbs[1] = MASK26
-    p_prime.limbs[2] = MASK26  
+    p_prime.limbs[2] = MASK26
     p_prime.limbs[3] = MASK26
-    p_prime.limbs[4] = (1'u64 shl 4) - 1
-    
+    p_prime.limbs[4] = MASK26
+
     temp.ctSub(p_prime)
-    
-    # Pack into 128 bits (lower 16 bytes only)
-    let t0 = temp.limbs[0] or (temp.limbs[1] shl 26) or ((temp.limbs[2] and 0x3f) shl 52)
-    let t1 = (temp.limbs[2] shr 6) or (temp.limbs[3] shl 20) or (temp.limbs[4] shl 46)
-    
-    # Convert to bytes
+
+    # Pack 5 x 26-bit limbs back into 128 bits
+    # Bit layout:
+    #   limbs[0] = bits 0-25
+    #   limbs[1] = bits 26-51
+    #   limbs[2] = bits 52-77
+    #   limbs[3] = bits 78-103
+    #   limbs[4] = bits 104-127 (only 24 bits for 128-bit output)
+    let t0 = temp.limbs[0] or (temp.limbs[1] shl 26) or ((temp.limbs[2] and 0xfff) shl 52)
+    let t1 = (temp.limbs[2] shr 12) or (temp.limbs[3] shl 14) or (temp.limbs[4] shl 40)
+
+    # Convert to bytes (little-endian)
     for i in 0..7:
         result[i] = byte((t0 shr (i * 8)) and 0xff)
-    for i in 8..15:
-        result[i] = byte((t1 shr ((i-8) * 8)) and 0xff)
+    for i in 0..7:
+        result[i + 8] = byte((t1 shr (i * 8)) and 0xff)
 
 # Poly1305 type using constant-time operations
 type
@@ -160,7 +243,7 @@ type
 # Initialize with key
 proc poly1305_init*(poly: var Poly1305, key: Key) =
     poly.r = fromKey(key[0..15])
-    poly.s = fromBytes(key[16..31])
+    poly.s = fromS(key[16..31])  # Use fromS for s value (no padding)
 
 # Update with data (process blocks)
 proc poly1305_update*(poly: var Poly1305, data: openArray[byte]) =
@@ -197,12 +280,13 @@ proc poly1305_verify*(expected_tag: Tag, computed_tag: Tag): bool =
     result = diff == 0
 
 # SECURITY: Secure finalization that clears sensitive state
+# Uses volatile writes to prevent Dead Store Elimination
 proc poly1305_finalize*(poly: var Poly1305) =
-    # Clear sensitive key material from memory
-    for i in 0..4:
-        poly.r.limbs[i] = 0
-        poly.s.limbs[i] = 0
-        poly.a.limbs[i] = 0
+    # Clear sensitive key material from memory using volatile writes
+    secureZeroArray(poly.r.limbs)
+    secureZeroArray(poly.s.limbs)
+    secureZeroArray(poly.a.limbs)
+    memoryBarrier()  # Ensure clears complete before function returns
 
 # Legacy compatibility
 proc poly1305_clamp*(poly: var Poly1305) =
