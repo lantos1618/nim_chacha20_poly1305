@@ -7,3 +7,4 @@ tests/test_*
 examples/basic_usage
 examples/*.exe
 *.exe
+*.out

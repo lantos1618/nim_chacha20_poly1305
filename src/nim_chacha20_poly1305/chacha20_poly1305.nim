@@ -92,6 +92,10 @@ proc chacha20_aead_poly1305*(
         # swap plain_data and cipher data as it is in reverse
         chacha20_xor(temp_c, cipher_data, plain_data)
 
+    # CRITICAL: Update caller's counter to reflect blocks consumed by encryption
+    # This prevents keystream/OTK collision on subsequent calls with same key/nonce
+    counter = temp_c.counter
+
     poly.poly1305_init(otk)
 
     # SECURITY: Use incremental MAC computation - no large buffer allocation

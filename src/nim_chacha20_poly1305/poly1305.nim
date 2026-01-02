@@ -115,18 +115,25 @@ proc add*(a: var Poly130, b: Poly130) =
         a.limbs[i] += b.limbs[i]
 
 # Constant-time conditional subtraction (if a >= b then a := a - b)
+# SECURITY: Properly handles 26-bit limb arithmetic without garbage bits
 proc ctSub*(a: var Poly130, b: Poly130) =
     var borrow: uint64 = 0
     var temp: array[5, uint64]
-    
-    # Try subtraction
+
+    # Try subtraction using offset to prevent underflow
+    # Add 2^26 to each limb before subtracting, then check if we borrowed
     for i in 0..4:
-        let x = a.limbs[i] - b.limbs[i] - borrow
-        temp[i] = x
-        borrow = x shr 63
-    
-    # If no borrow, use result; otherwise keep original
-    let mask = borrow - 1  # 0xffffffffffffffff if no borrow, 0 if borrow
+        # Add 2^26 to prevent uint64 underflow, then subtract
+        let x = (a.limbs[i] + (1'u64 shl 26)) - b.limbs[i] - borrow
+        # Result limb is lower 26 bits
+        temp[i] = x and MASK26
+        # If x < 2^26 (bit 26 not set), we needed the offset, so borrow = 1
+        borrow = 1'u64 - (x shr 26)
+
+    # If no final borrow, use result; otherwise keep original
+    # borrow = 0 means a >= b, so mask = 0xFFFFFFFFFFFFFFFF
+    # borrow = 1 means a < b, so mask = 0
+    let mask = borrow - 1
     for i in 0..4:
         a.limbs[i] = (a.limbs[i] and (not mask)) or (temp[i] and mask)
 
