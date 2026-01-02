@@ -1,5 +1,5 @@
 import bitops, endians
-import common
+import common, helpers
 
 # chacha20
 # https://datatracker.ietf.org/doc/html/rfc7539
@@ -108,7 +108,10 @@ proc chacha20_xor*(
     # SECURITY: Check for counter overflow before processing
     # Calculate number of blocks needed
     let blocks_needed = uint64((source.len + 63) div 64)
-    let counter_headroom = uint64(MAX_BLOCKS) - uint64(c.counter)
+    # Counter headroom = how many blocks we can process before overflow
+    # If counter is X, we can use blocks X, X+1, ..., MAX_BLOCKS (inclusive)
+    # That's (MAX_BLOCKS - X + 1) blocks total
+    let counter_headroom = uint64(high(uint32)) - uint64(c.counter) + 1
     if blocks_needed > counter_headroom:
         raise newException(ValueError, "SECURITY: Message too large - would cause counter overflow and keystream reuse")
 
@@ -143,3 +146,5 @@ proc chacha20_xor*(
                 raise newException(IndexDefect, "SECURITY: Buffer overflow prevented")
             destination[src_idx] = source[src_idx] xor key_stream[i]
 
+    # SECURITY: Clear keystream from stack to prevent leakage
+    secureZero(key_stream)
