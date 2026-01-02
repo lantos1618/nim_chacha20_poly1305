@@ -37,17 +37,22 @@ proc example_basic_aead() =
     echo "🔒 Encrypted: ", bytesToHex(ciphertext)
     echo "🛡️ Auth Tag: ", bytesToHex(tag)
     
-    # Decryption
+    # Decryption with MANDATORY authentication verification
     var decrypted = newSeq[byte](ciphertext.len)
     counter = 0  # Reset counter
-    
-    chacha20_aead_poly1305_decrypt(
+
+    # IMPORTANT: Always use decrypt_verified - it checks tag BEFORE decrypting
+    let success = chacha20_aead_poly1305_decrypt_verified(
         key, nonce, counter,
-        auth_data, decrypted, ciphertext, tag
+        auth_data, ciphertext, decrypted, tag
     )
-    
-    echo "✅ Decrypted: ", bytesToString(decrypted)
-    echo "✅ Success: Original message recovered!"
+
+    if success:
+        echo "✅ Decrypted: ", bytesToString(decrypted)
+        echo "✅ Success: Authentication verified and message recovered!"
+    else:
+        echo "❌ Authentication failed - data may be tampered!"
+        # decrypted buffer is automatically zeroed on failure
     echo ""
 
 proc example_streaming_large_data() =

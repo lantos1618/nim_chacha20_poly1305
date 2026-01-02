@@ -125,6 +125,9 @@ proc chacha20_aead_poly1305_encrypt*(
         true
     )
 
+# ⚠️ WARNING: This function does NOT verify the tag - it only computes it!
+# The 'tag' parameter is OVERWRITTEN with the computed tag.
+# For secure decryption, use chacha20_aead_poly1305_decrypt_verified() instead.
 proc chacha20_aead_poly1305_decrypt*(
     key: Key,
     nonce: Nonce,
@@ -132,7 +135,7 @@ proc chacha20_aead_poly1305_decrypt*(
     auth_data: openArray[byte],
     plain_data:var openArray[byte],
     cipher_data: var openArray[byte],
-    tag:var Tag) =
+    tag:var Tag) {.deprecated: "Use chacha20_aead_poly1305_decrypt_verified for secure decryption".} =
     chacha20_aead_poly1305(
         key,
         nonce,

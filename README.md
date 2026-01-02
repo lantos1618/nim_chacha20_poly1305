@@ -57,7 +57,7 @@ discard urandom(key)
 discard urandom(nonce)
 
 # Data to encrypt
-let plaintext = cast[seq[byte]]("Secret message!")
+var plaintext = cast[seq[byte]]("Secret message!")
 let auth_data = cast[seq[byte]]("Public metadata")
 
 # Encryption
@@ -70,16 +70,21 @@ chacha20_aead_poly1305_encrypt(
     auth_data, plaintext, ciphertext, tag
 )
 
-# Decryption with authentication
+# Decryption with MANDATORY authentication verification
 var decrypted = newSeq[byte](ciphertext.len)
 counter = 0  # Reset counter for decryption
 
-chacha20_aead_poly1305_decrypt(
+# IMPORTANT: Always use the verified function - it checks the tag BEFORE decrypting
+let success = chacha20_aead_poly1305_decrypt_verified(
     key, nonce, counter,
-    auth_data, decrypted, ciphertext, tag
+    auth_data, ciphertext, decrypted, tag
 )
 
-echo "Decrypted: ", cast[string](decrypted)
+if success:
+    echo "Decrypted: ", cast[string](decrypted)
+else:
+    echo "Authentication failed - data may be tampered!"
+    # decrypted buffer is automatically zeroed on failure
 ```
 
 ### Extended Nonce (XChaCha20-Poly1305)
@@ -347,24 +352,34 @@ type
 # Encryption
 proc chacha20_aead_poly1305_encrypt*(
     key: Key, nonce: Nonce, counter: var Counter,
-    auth_data: openArray[byte], 
-    plain_data: var openArray[byte],
-    cipher_data: var openArray[byte], 
-    tag: var Tag)
-
-# Decryption  
-proc chacha20_aead_poly1305_decrypt*(
-    key: Key, nonce: Nonce, counter: var Counter,
     auth_data: openArray[byte],
-    plain_data: var openArray[byte], 
+    plain_data: var openArray[byte],
     cipher_data: var openArray[byte],
     tag: var Tag)
 
-# Verification (constant-time)
+# ✅ RECOMMENDED: Authenticated decryption (verifies tag BEFORE decrypting)
+proc chacha20_aead_poly1305_decrypt_verified*(
+    key: Key, nonce: Nonce, counter: var Counter,
+    auth_data: openArray[byte],
+    cipher_data: openArray[byte],
+    plain_data: var openArray[byte],
+    expected_tag: Tag): bool
+    # Returns true if tag verified, false otherwise (output zeroed on failure)
+
+# ⚠️ LOW-LEVEL PRIMITIVE: Computes tag but does NOT verify it
+# Only use if you have a specific reason - prefer decrypt_verified above
+proc chacha20_aead_poly1305_decrypt*(
+    key: Key, nonce: Nonce, counter: var Counter,
+    auth_data: openArray[byte],
+    plain_data: var openArray[byte],
+    cipher_data: var openArray[byte],
+    tag: var Tag)  # WARNING: This OVERWRITES tag with computed value!
+
+# Tag-only verification (constant-time, no decryption)
 proc chacha20_poly1305_verify*(
     key: Key, nonce: Nonce, counter: Counter,
     auth_data: openArray[byte],
-    cipher_data: openArray[byte], 
+    cipher_data: openArray[byte],
     expected_tag: Tag): bool
 ```
 
