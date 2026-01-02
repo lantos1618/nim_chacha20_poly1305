@@ -6,11 +6,39 @@
 # - Input validation to prevent malformed data attacks
 
 import common, chacha20, poly1305
+import helpers
 
 # Helper to convert uint64 to little-endian bytes
 proc uint64ToBytes(x: uint64): array[8, byte] =
     for i in 0..7:
         result[i] = byte((x shr (i * 8)) and 0xff)
+
+# SECURITY: Compute Poly1305 MAC incrementally without allocating large buffers
+# This prevents memory exhaustion attacks with large inputs
+proc computeAeadMac(poly: var Poly1305, auth_data, cipher_data: openArray[byte]) =
+    # Process auth_data
+    poly.poly1305_update(auth_data)
+
+    # Add padding for auth_data (pad to 16-byte boundary)
+    let authPadLen = (16 - (auth_data.len mod 16)) mod 16
+    if authPadLen > 0:
+        var authPad: array[16, byte]  # Zero-initialized
+        poly.poly1305_update(authPad[0..<authPadLen])
+
+    # Process cipher_data
+    poly.poly1305_update(cipher_data)
+
+    # Add padding for cipher_data (pad to 16-byte boundary)
+    let cipherPadLen = (16 - (cipher_data.len mod 16)) mod 16
+    if cipherPadLen > 0:
+        var cipherPad: array[16, byte]  # Zero-initialized
+        poly.poly1305_update(cipherPad[0..<cipherPadLen])
+
+    # Add lengths (little-endian uint64)
+    let authLenBytes = uint64ToBytes(auth_data.len.uint64)
+    let cipherLenBytes = uint64ToBytes(cipher_data.len.uint64)
+    poly.poly1305_update(authLenBytes)
+    poly.poly1305_update(cipherLenBytes)
 
 # destination_key_block should be null
 proc chacha20_poly1305_key_gen*(
@@ -45,7 +73,6 @@ proc chacha20_aead_poly1305*(
         otk: Key
         temp_c: Chacha
         poly: Poly1305
-        mac_data: seq[byte]
 
     otk = chacha20_poly1305_key_gen(key, nonce, counter)
     counter.inc()
@@ -61,13 +88,14 @@ proc chacha20_aead_poly1305*(
 
     poly.poly1305_init(otk)
 
-    mac_data = mac_data & @auth_data & poly_pad(@auth_data, 16)
-    mac_data = mac_data & @cipher_data & poly_pad(@cipher_data, 16)
-    mac_data = mac_data & @(uint64ToBytes(auth_data.len.uint64))
-    mac_data = mac_data & @(uint64ToBytes(cipher_data.len.uint64))
+    # SECURITY: Use incremental MAC computation - no large buffer allocation
+    computeAeadMac(poly, auth_data, cipher_data)
 
-    poly.poly1305_update(mac_data)
     tag = poly.poly1305_final()
+
+    # SECURITY: Clear sensitive key material
+    secureZeroArray(otk)
+    poly.poly1305_finalize()
 
 proc chacha20_aead_poly1305_encrypt*(
     key: Key,
@@ -107,7 +135,8 @@ proc chacha20_aead_poly1305_decrypt*(
         false
     )
 
-# SECURITY: Constant-time verification function 
+# SECURITY: Constant-time verification function
+# Computes MAC WITHOUT decryption to prevent CPU exhaustion attacks
 proc chacha20_poly1305_verify*(
     key: Key,
     nonce: Nonce,
@@ -115,31 +144,60 @@ proc chacha20_poly1305_verify*(
     auth_data: openArray[byte],
     cipher_data: openArray[byte],
     expected_tag: Tag): bool =
-    # SECURITY: Recompute MAC and compare in constant time
+    # SECURITY: Compute MAC directly without decryption
+    # This prevents CPU exhaustion attacks with large malicious ciphertexts
     var
+        otk: Key
+        poly: Poly1305
         computed_tag: Tag
         temp_counter = counter
-        dummy_plain: seq[byte]
-    
-    # Allocate buffers for MAC computation
-    dummy_plain.setLen(cipher_data.len)
-    var cipher_copy = @cipher_data  # Make mutable copy
-    
-    # Compute MAC by running the AEAD decrypt (MAC verification)
-    chacha20_aead_poly1305(
-        key,
-        nonce,
-        temp_counter,
-        auth_data,
-        dummy_plain,
-        cipher_copy,
-        computed_tag,
-        false  # decrypt mode to compute MAC
-    )
-    
+
+    # Generate one-time key (same as encryption)
+    otk = chacha20_poly1305_key_gen(key, nonce, temp_counter)
+
+    # Compute MAC over auth_data and cipher_data (NO decryption needed!)
+    poly.poly1305_init(otk)
+    computeAeadMac(poly, auth_data, cipher_data)
+    computed_tag = poly.poly1305_final()
+
     # SECURITY: Constant-time comparison
     result = poly1305_verify(expected_tag, computed_tag)
-    
-    # SECURITY: Clear sensitive temporary data
-    for i in 0..<dummy_plain.len:
-        dummy_plain[i] = 0
+
+    # SECURITY: Clear sensitive key material
+    secureZeroArray(otk)
+    poly.poly1305_finalize()
+
+# SECURITY: Authenticated decryption that verifies tag BEFORE releasing plaintext
+# Returns false if tag verification fails (plaintext buffer is zeroed)
+proc chacha20_aead_poly1305_decrypt_verified*(
+    key: Key,
+    nonce: Nonce,
+    counter: var Counter = 0,
+    auth_data: openArray[byte],
+    cipher_data: openArray[byte],
+    plain_data: var openArray[byte],
+    expected_tag: Tag): bool =
+    # SECURITY: First verify the tag WITHOUT decryption
+    if not chacha20_poly1305_verify(key, nonce, counter, auth_data, cipher_data, expected_tag):
+        # Tag mismatch - zero output buffer and return false
+        secureZero(plain_data)
+        return false
+
+    # Tag verified - now safe to decrypt
+    var
+        otk: Key
+        temp_c: Chacha
+        temp_counter = counter
+
+    otk = chacha20_poly1305_key_gen(key, nonce, temp_counter)
+    temp_counter.inc()
+
+    temp_c.key = key
+    temp_c.nonce = nonce
+    temp_c.counter = temp_counter
+    chacha20_xor(temp_c, cipher_data, plain_data)
+
+    # SECURITY: Clear sensitive key material
+    secureZeroArray(otk)
+
+    return true

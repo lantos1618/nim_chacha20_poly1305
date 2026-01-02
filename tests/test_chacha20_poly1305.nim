@@ -168,4 +168,110 @@ suite "chacha20_poly1305":
 
         check(tag_out == tag_expected)
         check(cipher_data_decrypted == plain_data)
-        
+
+    test "chacha20_aead_poly1305_decrypt_verified - valid tag":
+        var
+            key: Key
+            nonce: Nonce
+            counter: Counter = 0
+            plain_data: array[32, byte] = [
+                0x48'u8, 0x65'u8, 0x6c'u8, 0x6c'u8, 0x6f'u8, 0x20'u8, 0x57'u8, 0x6f'u8,
+                0x72'u8, 0x6c'u8, 0x64'u8, 0x21'u8, 0x20'u8, 0x54'u8, 0x68'u8, 0x69'u8,
+                0x73'u8, 0x20'u8, 0x69'u8, 0x73'u8, 0x20'u8, 0x61'u8, 0x20'u8, 0x74'u8,
+                0x65'u8, 0x73'u8, 0x74'u8, 0x2e'u8, 0x2e'u8, 0x2e'u8, 0x2e'u8, 0x2e'u8,
+            ]
+            cipher_data: array[32, byte]
+            decrypted_data: array[32, byte]
+            aad: array[4, byte] = [0xAA'u8, 0xBB'u8, 0xCC'u8, 0xDD'u8]
+            tag: Tag
+
+        discard urandom(key)
+        discard urandom(nonce)
+
+        # Encrypt
+        chacha20_aead_poly1305_encrypt(
+            key, nonce, counter, aad, plain_data, cipher_data, tag)
+
+        # Decrypt with verified function - should succeed
+        counter = 0
+        let success = chacha20_aead_poly1305_decrypt_verified(
+            key, nonce, counter, aad, cipher_data, decrypted_data, tag)
+
+        check(success == true)
+        check(decrypted_data == plain_data)
+
+    test "chacha20_aead_poly1305_decrypt_verified - invalid tag":
+        var
+            key: Key
+            nonce: Nonce
+            counter: Counter = 0
+            plain_data: array[32, byte] = [
+                0x48'u8, 0x65'u8, 0x6c'u8, 0x6c'u8, 0x6f'u8, 0x20'u8, 0x57'u8, 0x6f'u8,
+                0x72'u8, 0x6c'u8, 0x64'u8, 0x21'u8, 0x20'u8, 0x54'u8, 0x68'u8, 0x69'u8,
+                0x73'u8, 0x20'u8, 0x69'u8, 0x73'u8, 0x20'u8, 0x61'u8, 0x20'u8, 0x74'u8,
+                0x65'u8, 0x73'u8, 0x74'u8, 0x2e'u8, 0x2e'u8, 0x2e'u8, 0x2e'u8, 0x2e'u8,
+            ]
+            cipher_data: array[32, byte]
+            decrypted_data: array[32, byte]
+            aad: array[4, byte] = [0xAA'u8, 0xBB'u8, 0xCC'u8, 0xDD'u8]
+            tag: Tag
+            bad_tag: Tag
+
+        discard urandom(key)
+        discard urandom(nonce)
+
+        # Encrypt
+        chacha20_aead_poly1305_encrypt(
+            key, nonce, counter, aad, plain_data, cipher_data, tag)
+
+        # Tamper with the tag
+        bad_tag = tag
+        bad_tag[0] = bad_tag[0] xor 0xFF'u8
+
+        # Decrypt with verified function - should fail
+        counter = 0
+        let success = chacha20_aead_poly1305_decrypt_verified(
+            key, nonce, counter, aad, cipher_data, decrypted_data, bad_tag)
+
+        check(success == false)
+        # Decrypted data should be zeroed on failure
+        var allZeros = true
+        for b in decrypted_data:
+            if b != 0:
+                allZeros = false
+                break
+        check(allZeros == true)
+
+    test "chacha20_poly1305_verify - rejects tampered ciphertext":
+        var
+            key: Key
+            nonce: Nonce
+            counter: Counter = 0
+            plain_data: array[32, byte] = [
+                0x48'u8, 0x65'u8, 0x6c'u8, 0x6c'u8, 0x6f'u8, 0x20'u8, 0x57'u8, 0x6f'u8,
+                0x72'u8, 0x6c'u8, 0x64'u8, 0x21'u8, 0x20'u8, 0x54'u8, 0x68'u8, 0x69'u8,
+                0x73'u8, 0x20'u8, 0x69'u8, 0x73'u8, 0x20'u8, 0x61'u8, 0x20'u8, 0x74'u8,
+                0x65'u8, 0x73'u8, 0x74'u8, 0x2e'u8, 0x2e'u8, 0x2e'u8, 0x2e'u8, 0x2e'u8,
+            ]
+            cipher_data: array[32, byte]
+            aad: array[4, byte] = [0xAA'u8, 0xBB'u8, 0xCC'u8, 0xDD'u8]
+            tag: Tag
+
+        discard urandom(key)
+        discard urandom(nonce)
+
+        # Encrypt
+        chacha20_aead_poly1305_encrypt(
+            key, nonce, counter, aad, plain_data, cipher_data, tag)
+
+        # Valid tag should verify
+        check(chacha20_poly1305_verify(key, nonce, 0, aad, cipher_data, tag) == true)
+
+        # Tampered ciphertext should fail
+        var tampered_cipher = cipher_data
+        tampered_cipher[0] = tampered_cipher[0] xor 0xFF'u8
+        check(chacha20_poly1305_verify(key, nonce, 0, aad, tampered_cipher, tag) == false)
+
+        # Tampered AAD should fail
+        var tampered_aad: array[4, byte] = [0xAA'u8, 0xBB'u8, 0xCC'u8, 0xDE'u8]
+        check(chacha20_poly1305_verify(key, nonce, 0, tampered_aad, cipher_data, tag) == false)

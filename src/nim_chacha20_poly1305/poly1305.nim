@@ -238,28 +238,62 @@ proc toBytes*(p: Poly130): array[16, byte] =
 type
     Poly1305* = object
         r*, s*, a*: Poly130
+        buffer*: array[16, byte]  # Buffer for partial blocks
+        bufferLen*: int           # Current bytes in buffer
         tag*: Tag
 
 # Initialize with key
 proc poly1305_init*(poly: var Poly1305, key: Key) =
     poly.r = fromKey(key[0..15])
     poly.s = fromS(key[16..31])  # Use fromS for s value (no padding)
+    poly.bufferLen = 0
+    for i in 0..15:
+        poly.buffer[i] = 0
 
-# Update with data (process blocks)
+# Process a single complete 16-byte block (internal use)
+proc processBlock(poly: var Poly1305, blockData: openArray[byte]) =
+    let n = fromBytes(blockData)
+    poly.a.add(n)
+    poly.a = mulMod(poly.a, poly.r)
+
+# Update with data (process blocks) - handles arbitrary chunk sizes correctly
 proc poly1305_update*(poly: var Poly1305, data: openArray[byte]) =
-    var i = 0
-    while i < data.len:
-        let blockLen = min(16, data.len - i)
-        let blockData = data[i..<i+blockLen]
+    var offset = 0
 
-        let n = fromBytes(blockData)
-        poly.a.add(n)
-        poly.a = mulMod(poly.a, poly.r)
+    # If we have buffered data, try to complete a block
+    if poly.bufferLen > 0:
+        let needed = 16 - poly.bufferLen
+        let available = min(needed, data.len)
+        for i in 0..<available:
+            poly.buffer[poly.bufferLen + i] = data[i]
+        poly.bufferLen += available
+        offset = available
 
-        i += 16
+        # If we have a complete block, process it
+        if poly.bufferLen == 16:
+            poly.processBlock(poly.buffer)
+            poly.bufferLen = 0
+
+    # Process complete 16-byte blocks directly from input
+    while offset + 16 <= data.len:
+        poly.processBlock(data[offset..<offset+16])
+        offset += 16
+
+    # Buffer any remaining partial block (do NOT process yet - no padding!)
+    let remaining = data.len - offset
+    if remaining > 0:
+        for i in 0..<remaining:
+            poly.buffer[poly.bufferLen + i] = data[offset + i]
+        poly.bufferLen += remaining
 
 # Finalize and produce tag (add s value)
 proc poly1305_final*(poly: var Poly1305): Tag =
+    # Process any remaining buffered data (final partial block with padding)
+    if poly.bufferLen > 0:
+        # fromBytes adds the 0x01 padding automatically for partial blocks
+        poly.processBlock(poly.buffer[0..<poly.bufferLen])
+        poly.bufferLen = 0
+
     # Add s and produce final tag
     poly.a.add(poly.s)
     let tagBytes = poly.a.toBytes()
@@ -286,6 +320,8 @@ proc poly1305_finalize*(poly: var Poly1305) =
     secureZeroArray(poly.r.limbs)
     secureZeroArray(poly.s.limbs)
     secureZeroArray(poly.a.limbs)
+    secureZero(poly.buffer)
+    poly.bufferLen = 0
     memoryBarrier()  # Ensure clears complete before function returns
 
 # Legacy compatibility
