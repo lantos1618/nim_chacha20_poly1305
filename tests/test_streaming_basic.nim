@@ -1,7 +1,7 @@
 # Basic streaming tests focusing on working functionality
 
 import unittest
-import nim_chacha20_poly1305/[common, streaming, helpers]
+import nim_chacha20_poly1305/[common, streaming]
 
 suite "streaming_basic":
     test "stream_cipher_functionality":

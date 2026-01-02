@@ -101,7 +101,7 @@ suite "xchacha20_poly1305":
         )
         check(cipher_bytes_out == cipher_data_expected)
         check(tag_out == tag_expected)
-    test "xchacha20_aead_poly1305_encrypt, xchacha20_aead_poly1305_decrypt":
+    test "xchacha20_aead_poly1305_encrypt and xchacha20_aead_poly1305_decrypt_verified":
         var
             key_in: Key = [
                 0x80'u8, 0x81'u8, 0x82'u8, 0x83'u8, 0x84'u8, 0x85'u8, 0x86'u8, 0x87'u8, 0x88'u8, 0x89'u8, 0x8a'u8, 0x8b'u8, 0x8c'u8, 0x8d'u8, 0x8e'u8, 0x8f'u8,
@@ -109,7 +109,6 @@ suite "xchacha20_poly1305":
             ]
             nonce_in: XNonce
             counter: Counter
-            # Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.
             plain_data: array[114, byte] = [
                 0x4c'u8, 0x61'u8, 0x64'u8, 0x69'u8, 0x65'u8, 0x73'u8, 0x20'u8, 0x61'u8, 0x6e'u8, 0x64'u8, 0x20'u8, 0x47'u8, 0x65'u8, 0x6e'u8, 0x74'u8, 0x6c'u8,
                 0x65'u8, 0x6d'u8, 0x65'u8, 0x6e'u8, 0x20'u8, 0x6f'u8, 0x66'u8, 0x20'u8, 0x74'u8, 0x68'u8, 0x65'u8, 0x20'u8, 0x63'u8, 0x6c'u8, 0x61'u8, 0x73'u8,
@@ -119,16 +118,13 @@ suite "xchacha20_poly1305":
                 0x74'u8, 0x68'u8, 0x65'u8, 0x20'u8, 0x66'u8, 0x75'u8, 0x74'u8, 0x75'u8, 0x72'u8, 0x65'u8, 0x2c'u8, 0x20'u8, 0x73'u8, 0x75'u8, 0x6e'u8, 0x73'u8,
                 0x63'u8, 0x72'u8, 0x65'u8, 0x65'u8, 0x6e'u8, 0x20'u8, 0x77'u8, 0x6f'u8, 0x75'u8, 0x6c'u8, 0x64'u8, 0x20'u8, 0x62'u8, 0x65'u8, 0x20'u8, 0x69'u8,
                 0x74'u8, 0x2e'u8,
-
-            ]   
+            ]
             auth_data_in = [
                 0x50'u8, 0x51'u8, 0x52'u8, 0x53'u8, 0xc0'u8, 0xc1'u8, 0xc2'u8, 0xc3'u8, 0xc4'u8, 0xc5'u8, 0xc6'u8, 0xc7'u8,
-
             ]
             cipher_data_decrypted: array[114, byte]
-            tag_out: Tag
-            tag_expected: Tag 
-            cipher_data_expected: array[114, byte]
+            tag_expected: Tag
+            ciphertext: array[114, byte]
 
         discard urandom(nonce_in)
         xchacha20_aead_poly1305_encrypt(
@@ -137,19 +133,64 @@ suite "xchacha20_poly1305":
             counter,
             auth_data_in,
             plain_data,
-            cipher_data_expected,
+            ciphertext,
             tag_expected
         )
         counter = 0
 
-        xchacha20_aead_poly1305_decrypt(
+        # Use verified decrypt
+        let verified = xchacha20_aead_poly1305_decrypt_verified(
             key_in,
             nonce_in,
             counter,
             auth_data_in,
+            ciphertext,
             cipher_data_decrypted,
-            cipher_data_expected,
-            tag_out
+            tag_expected
         )
+        check(verified == true)
         check(cipher_data_decrypted == plain_data)
-        check(tag_out == tag_expected)
+
+    test "xchacha20_aead_poly1305_decrypt_verified rejects tampered data":
+        var
+            key_in: Key = [
+                0x80'u8, 0x81'u8, 0x82'u8, 0x83'u8, 0x84'u8, 0x85'u8, 0x86'u8, 0x87'u8, 0x88'u8, 0x89'u8, 0x8a'u8, 0x8b'u8, 0x8c'u8, 0x8d'u8, 0x8e'u8, 0x8f'u8,
+                0x90'u8, 0x91'u8, 0x92'u8, 0x93'u8, 0x94'u8, 0x95'u8, 0x96'u8, 0x97'u8, 0x98'u8, 0x99'u8, 0x9a'u8, 0x9b'u8, 0x9c'u8, 0x9d'u8, 0x9e'u8, 0x9f'u8,
+            ]
+            nonce_in: XNonce
+            counter: Counter
+            plain_data: array[32, byte]
+            auth_data_in: array[12, byte]
+            decrypted: array[32, byte]
+            tag: Tag
+            ciphertext: array[32, byte]
+
+        discard urandom(nonce_in)
+        discard urandom(plain_data)
+        discard urandom(auth_data_in)
+
+        xchacha20_aead_poly1305_encrypt(
+            key_in,
+            nonce_in,
+            counter,
+            auth_data_in,
+            plain_data,
+            ciphertext,
+            tag
+        )
+
+        # Tamper with ciphertext
+        ciphertext[0] = ciphertext[0] xor 0xFF'u8
+        counter = 0
+
+        # Verified decrypt should fail
+        let verified = xchacha20_aead_poly1305_decrypt_verified(
+            key_in,
+            nonce_in,
+            counter,
+            auth_data_in,
+            ciphertext,
+            decrypted,
+            tag
+        )
+        check(verified == false)

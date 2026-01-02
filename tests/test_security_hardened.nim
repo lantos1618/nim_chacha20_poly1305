@@ -1,7 +1,7 @@
 # Comprehensive security tests for hardened ChaCha20-Poly1305 implementation
 
 import unittest, strutils
-import nim_chacha20_poly1305/[common, chacha20, poly1305, chacha20_poly1305, xchacha20_poly1305, helpers]
+import nim_chacha20_poly1305/[common, chacha20, poly1305, chacha20_poly1305, helpers]
 
 suite "security_hardened":
     test "constant_time_mac_verification":
