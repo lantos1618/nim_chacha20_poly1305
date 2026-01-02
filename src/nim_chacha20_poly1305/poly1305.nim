@@ -206,6 +206,16 @@ proc toBytes*(p: Poly130): array[16, byte] =
         carry = temp.limbs[i] shr 26
         temp.limbs[i] = temp.limbs[i] and MASK26
 
+    # CRITICAL: If there's still a carry out of limbs[4], fold it back
+    # This handles edge cases where value >= 2^130 after first reduction
+    # 2^130 ≡ 5 (mod 2^130-5), so carry * 5 must be added to limbs[0]
+    temp.limbs[0] += carry * 5
+    carry = temp.limbs[0] shr 26
+    temp.limbs[0] = temp.limbs[0] and MASK26
+    temp.limbs[1] += carry
+    # No further propagation needed: carry * 5 <= 5, so limbs[0] + 5 < 2^27
+    # and limbs[1] + 1 cannot overflow since limbs[1] was just masked to 26 bits
+
     # Final constant-time reduction modulo 2^130-5
     # If accumulator >= 2^130-5, subtract it
     # 2^130 - 5 in binary: all 130 bits set except bit 2
