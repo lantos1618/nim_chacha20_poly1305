@@ -122,23 +122,34 @@ proc chacha20_xor*(
     # Process complete 64-byte blocks
     while bytes_processed + 64 <= source.len:
         chacha20_block(c, key_stream)
+
+        # SECURITY: Explicit counter overflow check (required for -d:danger builds)
+        # where inc() silently wraps instead of raising RangeDefect
+        if c.counter == high(uint32):
+            secureZero(key_stream)
+            raise newException(ValueError, "SECURITY: Counter exhausted - change nonce before continuing")
         c.counter.inc()
-        
+
         # SECURITY: Explicit bounds check before XOR
         for i in 0..63:
             let src_idx = bytes_processed + i
             if src_idx >= source.len:
                 raise newException(IndexDefect, "SECURITY: Buffer overflow prevented")
             destination[src_idx] = source[src_idx] xor key_stream[i]
-        
+
         bytes_processed += 64
-    
+
     # Process remaining bytes (< 64 bytes)
     let remaining = source.len - bytes_processed
     if remaining > 0:
         chacha20_block(c, key_stream)
+
+        # SECURITY: Explicit counter overflow check for final block
+        if c.counter == high(uint32):
+            secureZero(key_stream)
+            raise newException(ValueError, "SECURITY: Counter exhausted - change nonce before continuing")
         c.counter.inc()
-        
+
         # SECURITY: Process only remaining bytes with bounds check
         for i in 0..<remaining:
             let src_idx = bytes_processed + i

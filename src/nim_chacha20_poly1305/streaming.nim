@@ -307,26 +307,40 @@ proc streamEncrypt*(key: Key, nonce: Nonce,
     result = aead.finalize()
 
 # SECURITY: Complete streaming decryption with verification
+# This function decrypts to an internal buffer first, then copies to output
+# only after successful verification. This prevents TOCTOU vulnerabilities
+# where unverified plaintext could be observed by other threads or persisted.
 proc streamDecrypt*(key: Key, nonce: Nonce,
-                    auth_data: openArray[byte], 
+                    auth_data: openArray[byte],
                     ciphertext: openArray[byte],
                     plaintext: var openArray[byte],
                     tag: Tag,
                     counter: Counter = 0): bool =
     if ciphertext.len != plaintext.len:
         raise newException(ValueError, "SECURITY: Ciphertext and plaintext lengths must match")
-    
+
+    # SECURITY: Decrypt to internal buffer first to prevent unverified plaintext exposure
+    # This adds memory overhead but is required for secure one-shot decryption
+    var tempBuffer = newSeq[byte](ciphertext.len)
+
     var aead = initStreamAEAD(key, nonce, encrypt = false, counter)
-    
+
     if auth_data.len > 0:
         aead.updateAuthData(auth_data)
     aead.finalizeAuthData()
-    
+
     if ciphertext.len > 0:
-        aead.updateCipherData(ciphertext, plaintext)
-    
+        aead.updateCipherData(ciphertext, tempBuffer)
+
     result = aead.verify(tag)
-    
-    # SECURITY: Clear plaintext on authentication failure
-    if not result:
+
+    if result:
+        # Verification succeeded - safe to copy plaintext to output
+        for i in 0..<tempBuffer.len:
+            plaintext[i] = tempBuffer[i]
+    else:
+        # Verification failed - zero the output buffer
         secureZero(plaintext)
+
+    # SECURITY: Always clear the temporary buffer
+    secureZero(tempBuffer)

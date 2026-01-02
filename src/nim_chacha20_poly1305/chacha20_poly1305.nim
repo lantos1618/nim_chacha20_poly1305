@@ -213,6 +213,10 @@ proc chacha20_aead_poly1305_decrypt_verified*(
     temp_c.counter = temp_counter
     chacha20_xor(temp_c, cipher_data, plain_data)
 
+    # CRITICAL: Update caller's counter to match encrypt() behavior
+    # This prevents keystream reuse when processing multiple messages sequentially
+    counter = temp_c.counter
+
     # SECURITY: Clear ALL sensitive key material from stack
     secureZeroArray(otk)
     secureZeroArray(temp_c.key)

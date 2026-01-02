@@ -1,7 +1,7 @@
 # Vulnerability proof-of-concept tests
 
 import unittest
-import nim_chacha20_poly1305/[common, chacha20, chacha20_poly1305]
+import nim_chacha20_poly1305/[common, chacha20_poly1305]
 
 suite "vulnerabilities":
   test "CRITICAL_keystream_reuse_due_to_bad_counter_update":
@@ -68,3 +68,42 @@ suite "vulnerabilities":
         fail()
     else:
       echo "[OK] Counter properly updated to ", counter
+
+  test "decrypt_verified_counter_update":
+    echo "\n[!] Testing decrypt_verified counter update..."
+
+    var key: Key
+    var nonce: Nonce
+
+    # Encrypt a 64-byte message
+    var plaintext = newSeq[byte](64)
+    for i in 0..63: plaintext[i] = byte(i)
+
+    var ciphertext = newSeq[byte](64)
+    var tag: Tag
+    var counter: Counter = 0
+
+    chacha20_aead_poly1305_encrypt(key, nonce, counter, @[], plaintext, ciphertext, tag)
+    let expected_counter = counter  # Should be 2 after encrypt
+    echo "Counter after encrypt: ", counter
+
+    # Now decrypt with counter reset
+    counter = 0
+    var decrypted = newSeq[byte](64)
+
+    let success = chacha20_aead_poly1305_decrypt_verified(
+      key, nonce, counter, @[], ciphertext, decrypted, tag
+    )
+
+    check(success)
+    check(decrypted == plaintext)
+
+    echo "Counter after decrypt_verified: ", counter
+
+    # Counter should be updated to same value as after encrypt
+    if counter != expected_counter:
+      echo "[!!!] VULNERABILITY: decrypt_verified doesn't update counter!"
+      echo "Expected: ", expected_counter, " Got: ", counter
+      fail()
+    else:
+      echo "[OK] decrypt_verified properly updates counter to ", counter
