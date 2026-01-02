@@ -119,30 +119,6 @@ proc xchacha20_aead_poly1305_encrypt*(
     # SECURITY: Clear sensitive sub-key from stack
     secureZeroArray(xkn.sub_key)
 
-proc xchacha20_aead_poly1305_decrypt*(
-    key: Key,
-    nonce: XNonce,
-    counter: var Counter = 0,
-    auth_data: openArray[byte],
-    plain_data: var openArray[byte],
-    cipher_data: var openArray[byte],
-    tag: var Tag
-    ) {.deprecated: "Use xchacha20_aead_poly1305_decrypt_verified for secure decryption".} =
-    var
-        xkn: XKN
-    xkn = xchacha20_init(key, nonce)
-    chacha20_aead_poly1305_decrypt(
-        xkn.sub_key,
-        xkn.sub_nonce,
-        counter,
-        auth_data,
-        plain_data,
-        cipher_data,
-        tag
-    )
-    # SECURITY: Clear sensitive sub-key from stack
-    secureZeroArray(xkn.sub_key)
-
 # SECURITY: Verified decryption that checks tag BEFORE releasing plaintext
 proc xchacha20_aead_poly1305_decrypt_verified*(
     key: Key,

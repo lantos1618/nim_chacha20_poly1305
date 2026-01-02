@@ -204,13 +204,10 @@ proc finalizeAuthData*(aead: var StreamAEAD) =
     
     aead.auth_data_processed = true
 
-# SECURITY: Streaming AEAD cipher data processing
-# ╔═══════════════════════════════════════════════════════════════════════╗
-# ║ 🚨 DECRYPT MODE WARNING: Output contains UNVERIFIED plaintext!        ║
-# ║ DO NOT process, parse, or act on this data until verify() = true.    ║
-# ║ For safe decryption, use streamDecrypt() instead.                    ║
-# ╚═══════════════════════════════════════════════════════════════════════╝
-proc updateCipherData*(aead: var StreamAEAD, input: openArray[byte], output: var openArray[byte]) =
+# INTERNAL: Streaming AEAD cipher data processing (private - use streamEncrypt/streamDecrypt)
+# In decrypt mode, output contains UNVERIFIED plaintext until verify() is called.
+# This function is intentionally private to prevent misuse.
+proc updateCipherData(aead: var StreamAEAD, input: openArray[byte], output: var openArray[byte]) =
     if not aead.initialized:
         raise newException(ValueError, "SECURITY: AEAD not initialized")
     if aead.finalized:

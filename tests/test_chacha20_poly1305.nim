@@ -123,8 +123,8 @@ suite "chacha20_poly1305":
 
         check(cipher_bytes_out == cipher_message_expected)
         check(tag_out == tag_expected )
-    test "chacha20_aead_poly1305_encrypt and chacha20_aead_poly1305_decrypt":
-        var 
+    test "chacha20_aead_poly1305_encrypt and decrypt round-trip":
+        var
             key: Key
             nonce: Nonce
             counter: Counter = 0
@@ -142,8 +142,7 @@ suite "chacha20_poly1305":
             cipher_data_decrypted:  array[114, byte]
             aad: array[18, byte] = [
                 97'u8, 117'u8, 116'u8, 104'u8, 101'u8, 110'u8, 116'u8, 105'u8, 99'u8, 97'u8, 116'u8, 101'u8, 100'u8, 32'u8, 100'u8, 97'u8, 116'u8, 97'u8]
-            tag_expected: Tag
-            tag_out: Tag
+            tag: Tag
 
         discard urandom(nonce)
         chacha20_aead_poly1305_encrypt(
@@ -153,20 +152,22 @@ suite "chacha20_poly1305":
             aad,
             plain_data,
             cipher_data,
-            tag_expected
+            tag
         )
         counter = 0
-        chacha20_aead_poly1305_decrypt(
+
+        # Use verified decrypt (the only safe way)
+        let success = chacha20_aead_poly1305_decrypt_verified(
             key,
             nonce,
             counter,
             aad,
-            cipher_data_decrypted,
             cipher_data,
-            tag_out
+            cipher_data_decrypted,
+            tag
         )
 
-        check(tag_out == tag_expected)
+        check(success)
         check(cipher_data_decrypted == plain_data)
 
     test "chacha20_aead_poly1305_decrypt_verified - valid tag":
