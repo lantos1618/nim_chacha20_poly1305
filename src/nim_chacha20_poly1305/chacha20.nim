@@ -4,7 +4,7 @@ import common, helpers
 # chacha20
 # https://datatracker.ietf.org/doc/html/rfc7539
 
-# SECURITY: Maximum message size per RFC 7539 (2^38 - 64 bytes ≈ 274 GB)
+# Maximum message size per RFC 7539 (2^38 - 64 bytes ≈ 274 GB)
 # With 32-bit counter at 64 bytes/block: 2^32 * 64 = 256 GB
 const
     MAX_BLOCKS* = 0xFFFFFFFF'u32  # Maximum blocks before counter overflow
@@ -92,20 +92,20 @@ proc chacha20_block*(
 
 
 
-# SECURITY: Secure encrypt and decrypt with bounds checking
+# Secure encrypt and decrypt with bounds checking
 proc chacha20_xor*(
     c: var ChaCha,
     source: openArray[byte],
     destination: var openArray[byte]
     ) =
-    # SECURITY: Verify buffer lengths match to prevent overflow
+    # Verify buffer lengths match to prevent overflow
     if source.len != destination.len:
-        raise newException(ValueError, "SECURITY: Source and destination lengths must match")
+        raise newException(ValueError, "Source and destination lengths must match")
 
     if source.len == 0:
         return  # Nothing to process
 
-    # SECURITY: Check for counter overflow before processing
+    # Check for counter overflow before processing
     # Calculate number of blocks needed
     let blocks_needed = uint64((source.len + 63) div 64)
     # Counter headroom = how many blocks we can process before overflow
@@ -113,7 +113,7 @@ proc chacha20_xor*(
     # That's (MAX_BLOCKS - X + 1) blocks total
     let counter_headroom = uint64(high(uint32)) - uint64(c.counter) + 1
     if blocks_needed > counter_headroom:
-        raise newException(ValueError, "SECURITY: Message too large - would cause counter overflow and keystream reuse")
+        raise newException(ValueError, "Message too large - would cause counter overflow and keystream reuse")
 
     var
         key_stream: Block
@@ -123,18 +123,18 @@ proc chacha20_xor*(
     while bytes_processed + 64 <= source.len:
         chacha20_block(c, key_stream)
 
-        # SECURITY: Explicit counter overflow check (required for -d:danger builds)
+        # Explicit counter overflow check (required for -d:danger builds)
         # where inc() silently wraps instead of raising RangeDefect
         if c.counter == high(uint32):
             secureZero(key_stream)
-            raise newException(ValueError, "SECURITY: Counter exhausted - change nonce before continuing")
+            raise newException(ValueError, "Counter exhausted - change nonce before continuing")
         c.counter.inc()
 
-        # SECURITY: Explicit bounds check before XOR
+        # Explicit bounds check before XOR
         for i in 0..63:
             let src_idx = bytes_processed + i
             if src_idx >= source.len:
-                raise newException(IndexDefect, "SECURITY: Buffer overflow prevented")
+                raise newException(IndexDefect, "Buffer overflow prevented")
             destination[src_idx] = source[src_idx] xor key_stream[i]
 
         bytes_processed += 64
@@ -144,18 +144,18 @@ proc chacha20_xor*(
     if remaining > 0:
         chacha20_block(c, key_stream)
 
-        # SECURITY: Explicit counter overflow check for final block
+        # Explicit counter overflow check for final block
         if c.counter == high(uint32):
             secureZero(key_stream)
-            raise newException(ValueError, "SECURITY: Counter exhausted - change nonce before continuing")
+            raise newException(ValueError, "Counter exhausted - change nonce before continuing")
         c.counter.inc()
 
-        # SECURITY: Process only remaining bytes with bounds check
+        # Process only remaining bytes with bounds check
         for i in 0..<remaining:
             let src_idx = bytes_processed + i
             if src_idx >= source.len or src_idx >= destination.len:
-                raise newException(IndexDefect, "SECURITY: Buffer overflow prevented")
+                raise newException(IndexDefect, "Buffer overflow prevented")
             destination[src_idx] = source[src_idx] xor key_stream[i]
 
-    # SECURITY: Clear keystream from stack to prevent leakage
+    # Clear keystream from stack to prevent leakage
     secureZero(key_stream)

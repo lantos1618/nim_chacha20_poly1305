@@ -1,31 +1,12 @@
 # Streaming ChaCha20-Poly1305 Implementation
 #
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  🚨 CRITICAL SECURITY WARNING - READ BEFORE USING STREAMING DECRYPT 🚨  ║
-# ╠══════════════════════════════════════════════════════════════════════════╣
-# ║                                                                          ║
-# ║  The streaming decryption API (updateCipherData in decrypt mode)         ║
-# ║  releases UNVERIFIED plaintext. This violates the Cryptographic          ║
-# ║  Doom Principle and is INSECURE for untrusted data streams.              ║
-# ║                                                                          ║
-# ║  SAFE:                                                                   ║
-# ║    ✅ streamDecrypt() - verifies tag, then returns plaintext             ║
-# ║    ✅ Streaming ENCRYPTION (updateCipherData with encrypt=true)          ║
-# ║    ✅ Buffer ALL output, call verify(), THEN process if true             ║
-# ║                                                                          ║
-# ║  UNSAFE (enables chosen-ciphertext attacks):                             ║
-# ║    ❌ Processing updateCipherData() output before verify()               ║
-# ║    ❌ Writing chunks to disk/network before final verification           ║
-# ║    ❌ Parsing, executing, or allocating based on unverified data         ║
-# ║                                                                          ║
-# ║  For secure large-file decryption, use a CHUNKED protocol where          ║
-# ║  each chunk has its own authentication tag (like libsodium secretstream) ║
-# ║                                                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# Note: Streaming decryption releases plaintext before tag verification.
+# Use streamDecrypt() which buffers and verifies first, or implement
+# chunked authentication for large files.
 
 import common, chacha20, poly1305, helpers
 
-# SECURITY: Streaming cipher state with proper isolation
+# Streaming cipher state with proper isolation
 type
     StreamCipher* = object
         chacha: ChaCha
@@ -49,13 +30,13 @@ type
         initialized: bool
         finalized: bool
 
-# SECURITY: Safe streaming cipher initialization
+# Safe streaming cipher initialization
 proc initStreamCipher*(key: Key, nonce: Nonce, counter: Counter = 0): StreamCipher =
-    # SECURITY: Input validation
+    # Input validation
     if key.len != 32:
-        raise newException(ValueError, "SECURITY: Key must be exactly 32 bytes")
+        raise newException(ValueError, "Key must be exactly 32 bytes")
     if nonce.len != 12:
-        raise newException(ValueError, "SECURITY: Nonce must be exactly 12 bytes")
+        raise newException(ValueError, "Nonce must be exactly 12 bytes")
     
     result.chacha.key = key
     result.chacha.nonce = nonce
@@ -64,15 +45,15 @@ proc initStreamCipher*(key: Key, nonce: Nonce, counter: Counter = 0): StreamCiph
     result.initialized = true
     result.finalized = false
 
-# SECURITY: Streaming encryption/decryption with proper state management
+# Streaming encryption/decryption with proper state management
 proc update*(cipher: var StreamCipher, input: openArray[byte], output: var openArray[byte]) =
-    # SECURITY: State validation
+    # State validation
     if not cipher.initialized:
-        raise newException(ValueError, "SECURITY: Cipher not initialized")
+        raise newException(ValueError, "Cipher not initialized")
     if cipher.finalized:
-        raise newException(ValueError, "SECURITY: Cipher already finalized")
+        raise newException(ValueError, "Cipher already finalized")
     if input.len != output.len:
-        raise newException(ValueError, "SECURITY: Input and output lengths must match")
+        raise newException(ValueError, "Input and output lengths must match")
     
     if input.len == 0:
         return  # Nothing to process
@@ -81,10 +62,10 @@ proc update*(cipher: var StreamCipher, input: openArray[byte], output: var openA
     for i in 0..<input.len:
         # Generate new keystream block if needed
         if cipher.buffer_pos >= 64:
-            # SECURITY: Check for counter overflow before generating new block
+            # Check for counter overflow before generating new block
             # RFC 7539: "If the counter overflows, the program MUST stop"
             if cipher.chacha.counter == high(uint32):
-                raise newException(ValueError, "SECURITY: Counter overflow - maximum message size exceeded (256 GB)")
+                raise newException(ValueError, "Counter overflow - maximum message size exceeded (256 GB)")
             cipher.chacha.chacha20_block(cipher.keystream_buffer)
             cipher.chacha.counter.inc()
             cipher.buffer_pos = 0
@@ -93,7 +74,7 @@ proc update*(cipher: var StreamCipher, input: openArray[byte], output: var openA
         output[i] = input[i] xor cipher.keystream_buffer[cipher.buffer_pos]
         cipher.buffer_pos.inc()
 
-# SECURITY: Finalize streaming cipher and clear sensitive state
+# Finalize streaming cipher and clear sensitive state
 proc finalize*(cipher: var StreamCipher) =
     if cipher.initialized:
         secureZeroArray(cipher.chacha.key)
@@ -102,47 +83,47 @@ proc finalize*(cipher: var StreamCipher) =
         secureZero(cipher.keystream_buffer)
         cipher.finalized = true
 
-# SECURITY: Safe streaming MAC initialization
+# Safe streaming MAC initialization
 proc initStreamMAC*(key: Key): StreamMAC =
     if key.len != 32:
-        raise newException(ValueError, "SECURITY: Key must be exactly 32 bytes")
+        raise newException(ValueError, "Key must be exactly 32 bytes")
     
     result.poly.poly1305_init(key)
     result.initialized = true  
     result.finalized = false
 
-# SECURITY: Streaming MAC update with validation
+# Streaming MAC update with validation
 proc update*(mac: var StreamMAC, data: openArray[byte]) =
     if not mac.initialized:
-        raise newException(ValueError, "SECURITY: MAC not initialized")
+        raise newException(ValueError, "MAC not initialized")
     if mac.finalized:
-        raise newException(ValueError, "SECURITY: MAC already finalized")
+        raise newException(ValueError, "MAC already finalized")
 
     if data.len > 0:
         # Use the fixed poly1305_update which now correctly processes blocks without finalizing
         mac.poly.poly1305_update(data)
 
-# SECURITY: MAC finalization with secure cleanup
+# MAC finalization with secure cleanup
 proc finalize*(mac: var StreamMAC): Tag =
     if not mac.initialized:
-        raise newException(ValueError, "SECURITY: MAC not initialized")
+        raise newException(ValueError, "MAC not initialized")
     if mac.finalized:
-        raise newException(ValueError, "SECURITY: MAC already finalized")
+        raise newException(ValueError, "MAC already finalized")
 
     # Complete MAC computation using the fixed poly1305_final function
     result = mac.poly.poly1305_final()
 
     mac.finalized = true
 
-    # SECURITY: Clear sensitive state
+    # Clear sensitive state
     mac.poly.poly1305_finalize()
 
 # INTERNAL: Core streaming AEAD initialization
 proc initStreamAEADImpl(key: Key, nonce: Nonce, encrypt: bool, counter: Counter): StreamAEAD =
     if key.len != 32:
-        raise newException(ValueError, "SECURITY: Key must be exactly 32 bytes")
+        raise newException(ValueError, "Key must be exactly 32 bytes")
     if nonce.len != 12:
-        raise newException(ValueError, "SECURITY: Nonce must be exactly 12 bytes")
+        raise newException(ValueError, "Nonce must be exactly 12 bytes")
 
     # Generate OTK for Poly1305 using ChaCha20 at counter 0
     var otk_counter = counter
@@ -159,7 +140,7 @@ proc initStreamAEADImpl(key: Key, nonce: Nonce, encrypt: bool, counter: Counter)
     temp_chacha.chacha20_block(key_block)
     copyMem(otk[0].addr, key_block[0].addr, 32)
 
-    # SECURITY: Clear temporary key block and chacha state
+    # Clear temporary key block and chacha state
     secureZero(key_block)
     secureZeroArray(temp_chacha.key)
     secureZeroArray(temp_chacha.state)
@@ -173,7 +154,7 @@ proc initStreamAEADImpl(key: Key, nonce: Nonce, encrypt: bool, counter: Counter)
     result.initialized = true
     result.finalized = false
 
-    # SECURITY: Clear OTK from stack
+    # Clear OTK from stack
     secureZero(otk)
 
 # DEPRECATED: Use initStreamAEADEncrypt() for encryption or streamDecrypt() for decryption.
@@ -183,27 +164,27 @@ proc initStreamAEAD*(key: Key, nonce: Nonce, encrypt: bool, counter: Counter = 0
     {.deprecated: "Use initStreamAEADEncrypt() for encryption or streamDecrypt() for safe decryption".} =
     initStreamAEADImpl(key, nonce, encrypt, counter)
 
-# SECURITY: Safe streaming encryption initialization
+# Safe streaming encryption initialization
 proc initStreamAEADEncrypt*(key: Key, nonce: Nonce, counter: Counter = 0): StreamAEAD =
     initStreamAEADImpl(key, nonce, encrypt = true, counter)
 
-# SECURITY: Streaming AEAD authenticated data processing
+# Streaming AEAD authenticated data processing
 proc updateAuthData*(aead: var StreamAEAD, auth_data: openArray[byte]) =
     if not aead.initialized:
-        raise newException(ValueError, "SECURITY: AEAD not initialized")
+        raise newException(ValueError, "AEAD not initialized")
     if aead.finalized:
-        raise newException(ValueError, "SECURITY: AEAD already finalized")
+        raise newException(ValueError, "AEAD already finalized")
     if aead.auth_data_processed:
-        raise newException(ValueError, "SECURITY: Auth data phase already completed")
+        raise newException(ValueError, "Auth data phase already completed")
     
     if auth_data.len > 0:
         aead.mac.update(auth_data)
         aead.auth_data_len += auth_data.len.uint64
 
-# SECURITY: Complete authenticated data phase
+# Complete authenticated data phase
 proc finalizeAuthData*(aead: var StreamAEAD) =
     if not aead.initialized:
-        raise newException(ValueError, "SECURITY: AEAD not initialized") 
+        raise newException(ValueError, "AEAD not initialized") 
     if aead.auth_data_processed:
         return  # Already processed
     
@@ -220,9 +201,9 @@ proc finalizeAuthData*(aead: var StreamAEAD) =
 # This function is intentionally private to prevent misuse.
 proc updateCipherData(aead: var StreamAEAD, input: openArray[byte], output: var openArray[byte]) =
     if not aead.initialized:
-        raise newException(ValueError, "SECURITY: AEAD not initialized")
+        raise newException(ValueError, "AEAD not initialized")
     if aead.finalized:
-        raise newException(ValueError, "SECURITY: AEAD already finalized")
+        raise newException(ValueError, "AEAD already finalized")
 
     # Emit compile-time warning for decrypt mode usage
     when defined(warnStreamingDecrypt):
@@ -233,7 +214,7 @@ proc updateCipherData(aead: var StreamAEAD, input: openArray[byte], output: var 
     aead.finalizeAuthData()
     
     if input.len != output.len:
-        raise newException(ValueError, "SECURITY: Input and output lengths must match")
+        raise newException(ValueError, "Input and output lengths must match")
     
     if input.len == 0:
         return
@@ -249,12 +230,12 @@ proc updateCipherData(aead: var StreamAEAD, input: openArray[byte], output: var 
     
     aead.cipher_data_len += input.len.uint64
 
-# SECURITY: AEAD finalization with length validation
+# AEAD finalization with length validation
 proc finalize*(aead: var StreamAEAD): Tag =
     if not aead.initialized:
-        raise newException(ValueError, "SECURITY: AEAD not initialized")
+        raise newException(ValueError, "AEAD not initialized")
     if aead.finalized:
-        raise newException(ValueError, "SECURITY: AEAD already finalized")
+        raise newException(ValueError, "AEAD already finalized")
     
     # Ensure auth data is finalized
     aead.finalizeAuthData()
@@ -282,26 +263,26 @@ proc finalize*(aead: var StreamAEAD): Tag =
     result = aead.mac.finalize()
     aead.finalized = true
 
-    # SECURITY: Clear length block and cipher state
+    # Clear length block and cipher state
     secureZero(length_block)
     aead.cipher.finalize()
 
-# SECURITY: Verify MAC in constant time for streaming AEAD
+# Verify MAC in constant time for streaming AEAD
 proc verify*(aead: var StreamAEAD, expected_tag: Tag): bool =
     if not aead.finalized:
         let computed_tag = aead.finalize()
         result = poly1305_verify(expected_tag, computed_tag)
     else:
-        raise newException(ValueError, "SECURITY: AEAD already finalized")
+        raise newException(ValueError, "AEAD already finalized")
 
-# SECURITY: Complete streaming encryption in one call
+# Complete streaming encryption in one call
 proc streamEncrypt*(key: Key, nonce: Nonce,
                     auth_data: openArray[byte],
                     plaintext: openArray[byte],
                     ciphertext: var openArray[byte],
                     counter: Counter = 0): Tag =
     if plaintext.len != ciphertext.len:
-        raise newException(ValueError, "SECURITY: Plaintext and ciphertext lengths must match")
+        raise newException(ValueError, "Plaintext and ciphertext lengths must match")
 
     var aead = initStreamAEADImpl(key, nonce, encrypt = true, counter)
     
@@ -314,7 +295,7 @@ proc streamEncrypt*(key: Key, nonce: Nonce,
     
     result = aead.finalize()
 
-# SECURITY: Complete streaming decryption with verification
+# Complete streaming decryption with verification
 # This function decrypts to an internal buffer first, then copies to output
 # only after successful verification. This prevents TOCTOU vulnerabilities
 # where unverified plaintext could be observed by other threads or persisted.
@@ -325,9 +306,9 @@ proc streamDecrypt*(key: Key, nonce: Nonce,
                     tag: Tag,
                     counter: Counter = 0): bool =
     if ciphertext.len != plaintext.len:
-        raise newException(ValueError, "SECURITY: Ciphertext and plaintext lengths must match")
+        raise newException(ValueError, "Ciphertext and plaintext lengths must match")
 
-    # SECURITY: Decrypt to internal buffer first to prevent unverified plaintext exposure
+    # Decrypt to internal buffer first to prevent unverified plaintext exposure
     # This adds memory overhead but is required for secure one-shot decryption
     var tempBuffer = newSeq[byte](ciphertext.len)
 
@@ -350,5 +331,5 @@ proc streamDecrypt*(key: Key, nonce: Nonce,
         # Verification failed - zero the output buffer
         secureZero(plaintext)
 
-    # SECURITY: Always clear the temporary buffer
+    # Always clear the temporary buffer
     secureZero(tempBuffer)

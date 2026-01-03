@@ -115,7 +115,7 @@ proc add*(a: var Poly130, b: Poly130) =
         a.limbs[i] += b.limbs[i]
 
 # Constant-time conditional subtraction (if a >= b then a := a - b)
-# SECURITY: Properly handles 26-bit limb arithmetic without garbage bits
+# Properly handles 26-bit limb arithmetic without garbage bits
 proc ctSub*(a: var Poly130, b: Poly130) =
     var borrow: uint64 = 0
     var temp: array[5, uint64]
@@ -138,7 +138,7 @@ proc ctSub*(a: var Poly130, b: Poly130) =
         a.limbs[i] = (a.limbs[i] and (not mask)) or (temp[i] and mask)
 
 # Multiply and reduce modulo 2^130-5
-# SECURITY: Fully constant-time implementation - no data-dependent branches
+# Fully constant-time implementation - no data-dependent branches
 proc mulMod*(a: Poly130, b: Poly130): Poly130 =
     # Schoolbook multiplication
     var c: array[9, uint64]  # Product can be up to 260 bits
@@ -160,11 +160,11 @@ proc mulMod*(a: Poly130, b: Poly130): Poly130 =
         result.limbs[i] = c[i] and MASK26
         carry = c[i] shr 26
 
-    # SECURITY: Branchless final reduction
+    # Branchless final reduction
     # Always perform carry * 5 addition (carry may be 0, which is fine)
     result.limbs[0] += carry * 5
 
-    # SECURITY: Always propagate carries through ALL limbs - no early exit
+    # Always propagate carries through ALL limbs - no early exit
     # This ensures constant-time execution regardless of data values
     carry = result.limbs[0] shr 26
     result.limbs[0] = result.limbs[0] and MASK26
@@ -213,7 +213,7 @@ proc toBytes*(p: Poly130): array[16, byte] =
         carry = temp.limbs[i] shr 26
         temp.limbs[i] = temp.limbs[i] and MASK26
 
-    # CRITICAL: If there's still a carry out of limbs[4], fold it back
+    # If there's still a carry out of limbs[4], fold it back
     # This handles edge cases where value >= 2^130 after first reduction
     # 2^130 ≡ 5 (mod 2^130-5), so carry * 5 must be added to limbs[0]
     temp.limbs[0] += carry * 5
@@ -322,15 +322,15 @@ func poly_pad*(data: openArray[byte], x: int): seq[byte] =
     if data.len() mod x != 0:
         result.setLen(x - (data.len() mod x))
 
-# SECURITY: Constant-time MAC verification to prevent timing attacks
+# Constant-time MAC verification to prevent timing attacks
 proc poly1305_verify*(expected_tag: Tag, computed_tag: Tag): bool =
-    # SECURITY: Constant-time comparison to prevent timing side-channel attacks
+    # Constant-time comparison to prevent timing side-channel attacks
     var diff: byte = 0
     for i in 0..<16:
         diff = diff or (expected_tag[i] xor computed_tag[i])
     result = diff == 0
 
-# SECURITY: Secure finalization that clears sensitive state
+# Secure finalization that clears sensitive state
 # Uses volatile writes to prevent Dead Store Elimination
 proc poly1305_finalize*(poly: var Poly1305) =
     # Clear sensitive key material from memory using volatile writes

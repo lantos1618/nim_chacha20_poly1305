@@ -1,9 +1,4 @@
-# SECURITY-HARDENED ChaCha20-Poly1305 AEAD Implementation
-# Implements RFC 7539 with additional security measures:
-# - Constant-time operations to prevent timing attacks
-# - Comprehensive bounds checking to prevent buffer overflows
-# - Secure memory clearing to prevent data leakage
-# - Input validation to prevent malformed data attacks
+# ChaCha20-Poly1305 AEAD Implementation (RFC 7539)
 
 import common, chacha20, poly1305
 import helpers
@@ -13,7 +8,7 @@ proc uint64ToBytes(x: uint64): array[8, byte] =
     for i in 0..7:
         result[i] = byte((x shr (i * 8)) and 0xff)
 
-# SECURITY: Compute Poly1305 MAC incrementally without allocating large buffers
+# Compute Poly1305 MAC incrementally without allocating large buffers
 # This prevents memory exhaustion attacks with large inputs
 proc computeAeadMac(poly: var Poly1305, auth_data, cipher_data: openArray[byte]) =
     # Process auth_data
@@ -55,7 +50,7 @@ proc chacha20_poly1305_key_gen*(
     chacha20_block(temp_c, key_block)
     copyMem(result[0].addr, key_block[0].addr, 32)
 
-    # SECURITY: Clear sensitive state from stack
+    # Clear sensitive state from stack
     secureZero(key_block)
     secureZeroArray(temp_c.key)
     secureZeroArray(temp_c.state)
@@ -91,18 +86,18 @@ proc chacha20_aead_poly1305_impl(
         # swap plain_data and cipher data as it is in reverse
         chacha20_xor(temp_c, cipher_data, plain_data)
 
-    # CRITICAL: Update caller's counter to reflect blocks consumed by encryption
+    # Update caller's counter to reflect blocks consumed by encryption
     # This prevents keystream/OTK collision on subsequent calls with same key/nonce
     counter = temp_c.counter
 
     poly.poly1305_init(otk)
 
-    # SECURITY: Use incremental MAC computation - no large buffer allocation
+    # Use incremental MAC computation - no large buffer allocation
     computeAeadMac(poly, auth_data, cipher_data)
 
     tag = poly.poly1305_final()
 
-    # SECURITY: Clear ALL sensitive key material from stack
+    # Clear ALL sensitive key material from stack
     secureZeroArray(otk)
     secureZeroArray(temp_c.key)
     secureZeroArray(temp_c.state)
@@ -145,7 +140,7 @@ proc chacha20_aead_poly1305_encrypt*(
         true
     )
 
-# SECURITY: Constant-time verification function
+# Constant-time verification function
 # Computes MAC WITHOUT decryption to prevent CPU exhaustion attacks
 proc chacha20_poly1305_verify*(
     key: Key,
@@ -154,7 +149,7 @@ proc chacha20_poly1305_verify*(
     auth_data: openArray[byte],
     cipher_data: openArray[byte],
     expected_tag: Tag): bool =
-    # SECURITY: Compute MAC directly without decryption
+    # Compute MAC directly without decryption
     # This prevents CPU exhaustion attacks with large malicious ciphertexts
     var
         otk: Key
@@ -170,14 +165,14 @@ proc chacha20_poly1305_verify*(
     computeAeadMac(poly, auth_data, cipher_data)
     computed_tag = poly.poly1305_final()
 
-    # SECURITY: Constant-time comparison
+    # Constant-time comparison
     result = poly1305_verify(expected_tag, computed_tag)
 
-    # SECURITY: Clear sensitive key material
+    # Clear sensitive key material
     secureZeroArray(otk)
     poly.poly1305_finalize()
 
-# SECURITY: Authenticated decryption that verifies tag BEFORE releasing plaintext
+# Authenticated decryption that verifies tag BEFORE releasing plaintext
 # Returns false if tag verification fails (plaintext buffer is zeroed)
 proc chacha20_aead_poly1305_decrypt_verified*(
     key: Key,
@@ -187,7 +182,7 @@ proc chacha20_aead_poly1305_decrypt_verified*(
     cipher_data: openArray[byte],
     plain_data: var openArray[byte],
     expected_tag: Tag): bool =
-    # SECURITY: First verify the tag WITHOUT decryption
+    # First verify the tag WITHOUT decryption
     if not chacha20_poly1305_verify(key, nonce, counter, auth_data, cipher_data, expected_tag):
         # Tag mismatch - zero output buffer and return false
         secureZero(plain_data)
@@ -207,11 +202,11 @@ proc chacha20_aead_poly1305_decrypt_verified*(
     temp_c.counter = temp_counter
     chacha20_xor(temp_c, cipher_data, plain_data)
 
-    # CRITICAL: Update caller's counter to match encrypt() behavior
+    # Update caller's counter to match encrypt() behavior
     # This prevents keystream reuse when processing multiple messages sequentially
     counter = temp_c.counter
 
-    # SECURITY: Clear ALL sensitive key material from stack
+    # Clear ALL sensitive key material from stack
     secureZeroArray(otk)
     secureZeroArray(temp_c.key)
     secureZeroArray(temp_c.state)
