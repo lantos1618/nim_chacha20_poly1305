@@ -39,7 +39,7 @@ jobs:
     - name: 🧪 Core Tests
       run: |
         export PATH="/home/runner/.nimble/bin:$PATH"
-        nim c -r tests/test_poly1305_ct.nim
+        nim c -r tests/test_poly1305.nim
         nim c -r tests/test_chacha20.nim
 
     - name: 🌊 Streaming Tests
