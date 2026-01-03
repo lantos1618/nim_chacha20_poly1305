@@ -62,18 +62,17 @@ proc chacha20_poly1305_key_gen*(
     secureZeroArray(temp_c.initial_state)
 
 
-# encrypt and dcrypt
-# be sure to check tag_encrypt == tag_decrypt 
-# https://datatracker.ietf.org/doc/html/rfc7539#section-2.8.1
-proc chacha20_aead_poly1305*(
+# INTERNAL: Core AEAD implementation used by encrypt/decrypt functions
+# Not exported - use the safe wrappers instead
+proc chacha20_aead_poly1305_impl(
     key: Key,
     nonce: Nonce,
-    counter: var Counter = 0,
+    counter: var Counter,
     auth_data: openArray[byte],
     plain_data: var openArray[byte],
     cipher_data: var openArray[byte],
     tag: var Tag,
-    encrypt: bool = true
+    encrypt: bool
     ) =
     var
         otk: Key
@@ -110,6 +109,23 @@ proc chacha20_aead_poly1305*(
     secureZeroArray(temp_c.initial_state)
     poly.poly1305_finalize()
 
+# DEPRECATED: Use chacha20_aead_poly1305_encrypt() for encryption
+# or chacha20_aead_poly1305_decrypt_verified() for decryption.
+# This function with encrypt=false does NOT verify the tag before decrypting,
+# which violates the Cryptographic Doom Principle and enables chosen-ciphertext attacks.
+# https://datatracker.ietf.org/doc/html/rfc7539#section-2.8.1
+proc chacha20_aead_poly1305*(
+    key: Key,
+    nonce: Nonce,
+    counter: var Counter = 0,
+    auth_data: openArray[byte],
+    plain_data: var openArray[byte],
+    cipher_data: var openArray[byte],
+    tag: var Tag,
+    encrypt: bool = true
+    ) {.deprecated: "Use chacha20_aead_poly1305_encrypt() or chacha20_aead_poly1305_decrypt_verified() instead".} =
+    chacha20_aead_poly1305_impl(key, nonce, counter, auth_data, plain_data, cipher_data, tag, encrypt)
+
 proc chacha20_aead_poly1305_encrypt*(
     key: Key,
     nonce: Nonce,
@@ -118,7 +134,7 @@ proc chacha20_aead_poly1305_encrypt*(
     plain_data:var openArray[byte],
     cipher_data: var openArray[byte],
     tag:var Tag) =
-    chacha20_aead_poly1305(
+    chacha20_aead_poly1305_impl(
         key,
         nonce,
         counter,

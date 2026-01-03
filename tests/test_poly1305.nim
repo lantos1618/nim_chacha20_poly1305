@@ -137,3 +137,134 @@ suite "poly1305":
             0x09'u8, 0x0a'u8, 0x0b'u8, 0x0c'u8, 0x0d'u8, 0x0e'u8, 0x0f'u8, 0x10'u8
         ]
         check(tag == expected)
+
+    test "poly1305 - all 0xFF bytes (edge case near modulus)":
+        # Test with all 0xFF bytes which creates large values that test reduction logic
+        var key: Key = [
+            0x01'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
+            0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
+            0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
+            0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8
+        ]
+
+        # 16 bytes of 0xFF creates a large accumulator value
+        var all_ff: array[16, byte]
+        for i in 0..15:
+            all_ff[i] = 0xFF
+
+        var poly: Poly1305
+        poly.poly1305_init(key)
+        poly.poly1305_update(all_ff)
+        let tag = poly.poly1305_final()
+
+        # Verify tag is computed (non-zero check for valid computation)
+        var nonzero = false
+        for b in tag:
+            if b != 0:
+                nonzero = true
+                break
+        check(nonzero)
+
+    test "poly1305 - multiple blocks of 0xFF":
+        # Test with multiple 16-byte blocks of 0xFF to exercise carry propagation
+        var key: Key = [
+            0x02'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
+            0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
+            0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
+            0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8
+        ]
+
+        var data: array[64, byte]
+        for i in 0..63:
+            data[i] = 0xFF
+
+        var poly: Poly1305
+        poly.poly1305_init(key)
+        poly.poly1305_update(data)
+        let tag = poly.poly1305_final()
+
+        # Should produce consistent results
+        var poly2: Poly1305
+        poly2.poly1305_init(key)
+        poly2.poly1305_update(data[0..<32])
+        poly2.poly1305_update(data[32..<64])
+        let tag2 = poly2.poly1305_final()
+
+        check(tag == tag2)
+
+    test "poly1305 - wrap around test (values near 2^130-5)":
+        # This test uses specific inputs designed to test modular reduction
+        # Key with r = 0x0ffffffc0ffffffc0ffffffc0fffffff (max after clamping)
+        var key: Key = [
+            0xFF'u8, 0xFF'u8, 0xFF'u8, 0x0F'u8, 0xFC'u8, 0xFF'u8, 0xFF'u8, 0x0F'u8,
+            0xFC'u8, 0xFF'u8, 0xFF'u8, 0x0F'u8, 0xFC'u8, 0xFF'u8, 0xFF'u8, 0x0F'u8,
+            0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
+            0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8
+        ]
+
+        var data: array[32, byte]
+        for i in 0..31:
+            data[i] = 0xFF
+
+        var poly: Poly1305
+        poly.poly1305_init(key)
+        poly.poly1305_update(data)
+        let tag = poly.poly1305_final()
+
+        # Verify it completes without overflow/crash and produces consistent output
+        var poly2: Poly1305
+        poly2.poly1305_init(key)
+        poly2.poly1305_update(data)
+        let tag2 = poly2.poly1305_final()
+
+        check(tag == tag2)
+
+    test "poly1305 - partial block sizes":
+        # Test various partial block sizes to ensure padding is correct
+        var key: Key = [
+            0x85'u8, 0xd6'u8, 0xbe'u8, 0x78'u8, 0x57'u8, 0x55'u8, 0x6d'u8, 0x33'u8,
+            0x7f'u8, 0x44'u8, 0x52'u8, 0xfe'u8, 0x42'u8, 0xd5'u8, 0x06'u8, 0xa8'u8,
+            0x01'u8, 0x03'u8, 0x80'u8, 0x8a'u8, 0xfb'u8, 0x0d'u8, 0xb2'u8, 0xfd'u8,
+            0x4a'u8, 0xbf'u8, 0xf6'u8, 0xaf'u8, 0x41'u8, 0x49'u8, 0xf5'u8, 0x1b'u8
+        ]
+
+        # Test sizes 1 through 17 bytes (partial, full, and partial+1)
+        for size in 1..17:
+            var data = newSeq[byte](size)
+            for i in 0..<size:
+                data[i] = byte(i + 1)
+
+            var poly: Poly1305
+            poly.poly1305_init(key)
+            poly.poly1305_update(data)
+            let tag = poly.poly1305_final()
+
+            # Verify non-zero tag
+            var nonzero = false
+            for b in tag:
+                if b != 0:
+                    nonzero = true
+                    break
+            check(nonzero)
+
+    test "poly1305 - finalize clears state":
+        var key: Key = [
+            0x85'u8, 0xd6'u8, 0xbe'u8, 0x78'u8, 0x57'u8, 0x55'u8, 0x6d'u8, 0x33'u8,
+            0x7f'u8, 0x44'u8, 0x52'u8, 0xfe'u8, 0x42'u8, 0xd5'u8, 0x06'u8, 0xa8'u8,
+            0x01'u8, 0x03'u8, 0x80'u8, 0x8a'u8, 0xfb'u8, 0x0d'u8, 0xb2'u8, 0xfd'u8,
+            0x4a'u8, 0xbf'u8, 0xf6'u8, 0xaf'u8, 0x41'u8, 0x49'u8, 0xf5'u8, 0x1b'u8
+        ]
+
+        var poly: Poly1305
+        poly.poly1305_init(key)
+        poly.poly1305_update(cast[seq[byte]]("test"))
+        discard poly.poly1305_final()
+
+        # Finalize should clear sensitive state
+        poly.poly1305_finalize()
+
+        # Verify r, s, a are all zeroed
+        for i in 0..4:
+            check(poly.r.limbs[i] == 0)
+            check(poly.s.limbs[i] == 0)
+            check(poly.a.limbs[i] == 0)

@@ -137,28 +137,28 @@ proc finalize*(mac: var StreamMAC): Tag =
     # SECURITY: Clear sensitive state
     mac.poly.poly1305_finalize()
 
-# SECURITY: Streaming AEAD initialization with mode validation
-proc initStreamAEAD*(key: Key, nonce: Nonce, encrypt: bool, counter: Counter = 0): StreamAEAD =
+# INTERNAL: Core streaming AEAD initialization
+proc initStreamAEADImpl(key: Key, nonce: Nonce, encrypt: bool, counter: Counter): StreamAEAD =
     if key.len != 32:
         raise newException(ValueError, "SECURITY: Key must be exactly 32 bytes")
     if nonce.len != 12:
         raise newException(ValueError, "SECURITY: Nonce must be exactly 12 bytes")
-    
+
     # Generate OTK for Poly1305 using ChaCha20 at counter 0
     var otk_counter = counter
     result.cipher = initStreamCipher(key, nonce, otk_counter + 1)  # Data starts at counter+1
-    
+
     # Generate one-time key for MAC
     var otk: Key
     var temp_chacha: ChaCha
     temp_chacha.key = key
-    temp_chacha.nonce = nonce  
+    temp_chacha.nonce = nonce
     temp_chacha.counter = otk_counter  # OTK at counter
-    
+
     var key_block: Block
     temp_chacha.chacha20_block(key_block)
     copyMem(otk[0].addr, key_block[0].addr, 32)
-    
+
     # SECURITY: Clear temporary key block and chacha state
     secureZero(key_block)
     secureZeroArray(temp_chacha.key)
@@ -175,6 +175,17 @@ proc initStreamAEAD*(key: Key, nonce: Nonce, encrypt: bool, counter: Counter = 0
 
     # SECURITY: Clear OTK from stack
     secureZero(otk)
+
+# DEPRECATED: Use initStreamAEADEncrypt() for encryption or streamDecrypt() for decryption.
+# Using encrypt=false with manual streaming releases UNVERIFIED plaintext,
+# violating the Cryptographic Doom Principle. Use streamDecrypt() for safe decryption.
+proc initStreamAEAD*(key: Key, nonce: Nonce, encrypt: bool, counter: Counter = 0): StreamAEAD
+    {.deprecated: "Use initStreamAEADEncrypt() for encryption or streamDecrypt() for safe decryption".} =
+    initStreamAEADImpl(key, nonce, encrypt, counter)
+
+# SECURITY: Safe streaming encryption initialization
+proc initStreamAEADEncrypt*(key: Key, nonce: Nonce, counter: Counter = 0): StreamAEAD =
+    initStreamAEADImpl(key, nonce, encrypt = true, counter)
 
 # SECURITY: Streaming AEAD authenticated data processing
 proc updateAuthData*(aead: var StreamAEAD, auth_data: openArray[byte]) =
@@ -284,15 +295,15 @@ proc verify*(aead: var StreamAEAD, expected_tag: Tag): bool =
         raise newException(ValueError, "SECURITY: AEAD already finalized")
 
 # SECURITY: Complete streaming encryption in one call
-proc streamEncrypt*(key: Key, nonce: Nonce, 
+proc streamEncrypt*(key: Key, nonce: Nonce,
                     auth_data: openArray[byte],
-                    plaintext: openArray[byte], 
+                    plaintext: openArray[byte],
                     ciphertext: var openArray[byte],
                     counter: Counter = 0): Tag =
     if plaintext.len != ciphertext.len:
         raise newException(ValueError, "SECURITY: Plaintext and ciphertext lengths must match")
-    
-    var aead = initStreamAEAD(key, nonce, encrypt = true, counter)
+
+    var aead = initStreamAEADImpl(key, nonce, encrypt = true, counter)
     
     if auth_data.len > 0:
         aead.updateAuthData(auth_data)
@@ -320,7 +331,7 @@ proc streamDecrypt*(key: Key, nonce: Nonce,
     # This adds memory overhead but is required for secure one-shot decryption
     var tempBuffer = newSeq[byte](ciphertext.len)
 
-    var aead = initStreamAEAD(key, nonce, encrypt = false, counter)
+    var aead = initStreamAEADImpl(key, nonce, encrypt = false, counter)
 
     if auth_data.len > 0:
         aead.updateAuthData(auth_data)

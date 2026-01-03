@@ -112,7 +112,7 @@ suite "chacha20_poly1305":
         otk_out = chacha20_poly1305_key_gen(key_in, nonce_in, 0)
         check(otk_out == otk_expected)
 
-        chacha20_aead_poly1305(
+        chacha20_aead_poly1305_encrypt(
             key_in,
             nonce_in,
             counter,
